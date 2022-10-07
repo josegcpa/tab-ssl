@@ -122,7 +122,7 @@ class SemiSLVIME(torch.nn.Module):
         self.adn_fn = adn_fn
 
         self.predictor = torch.nn.Sequential(
-            MLP(self.encoder.structure[-1],
+            MLP(self.encoder.encoder.structure[-1],
                 self.predictor_structure,
                 self.adn_fn),
             self.adn_fn(self.predictor_structure[-1]),
@@ -130,5 +130,5 @@ class SemiSLVIME(torch.nn.Module):
 
     def forward(self,X):
         with torch.no_grad():
-            enc_out = self.encoder(X)
+            enc_out = self.encoder.encoder(X)
         return self.predictor(enc_out)

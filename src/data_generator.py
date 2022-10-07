@@ -37,7 +37,7 @@ class PerturbedDataGenerator:
             sub_X = X[idxs,:]
         if ad is not None:
             sub_X = ad.transform(sub_X)
-        if y is not None:
+        if y is None:
             return sub_X,idxs
         else:
             return sub_X,y[idxs],idxs
@@ -67,7 +67,7 @@ class PerturbedDataGenerator:
         if y is None and self.y is not None:
             y = self.y
         if y is None:
-            sub_X,idxs = self.retrieve_n_entries(X,n,self.ad,idxs)
+            sub_X,idxs = self.retrieve_n_entries(X,y,n,self.ad,idxs)
             sub_X_perturbed,masks = self.retrieve_perturbed_entries(
                 X,idxs,n_p,self.p,self.ad)
             return (sub_X,

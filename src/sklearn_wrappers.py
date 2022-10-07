@@ -245,8 +245,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
 class SKLearnSemiSLVIME(BaseEstimator):
     def __init__(self,
                  vime_self_sl: BaseEstimator,
-                 encoder_structure: Sequence[int],
-                 decoder_structure: Sequence[int],
+                 predictor_structure: Sequence[int],
                  act_fn: str="relu",
                  batch_norm: bool=False,
                  batch_size: Union[int,str]="auto",
@@ -265,7 +264,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
                  verbose: bool=False):
         super().__init__()
         self.vime_self_sl = vime_self_sl
-        self.predictor_structure = encoder_structure
+        self.predictor_structure = predictor_structure
         self.act_fn = act_fn
         self.batch_norm = batch_norm
         self.batch_size = batch_size
@@ -280,6 +279,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
         self.optimizer_params = optimizer_params
         self.n_iter_no_change = n_iter_no_change
         self.cat_cols = cat_cols
+        self.class_weight = class_weight
         self.verbose = verbose
 
     def get_adn_fn_(self):
@@ -311,6 +311,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
                 the same and is {} and {}".format(
                     self.n_features_,self.n_features_unlabelled_))
         self.classes_, y = np.unique(y, return_inverse=True)
+        self.n_classes_ = len(self.classes_)
         if self.class_weight == "balanced":
             self.class_weights_ = compute_class_weight(
                 "balanced",classes=self.classes_,y=y[train_idxs])
@@ -321,12 +322,8 @@ class SKLearnSemiSLVIME(BaseEstimator):
             else:
                 self.class_weights_ = torch.unsqueeze(
                     torch.as_tensor(self.class_weights_),1)
-        if self.n_classes_ == 2:
-            self.class_dtype_ = torch.float32
-        else:
-            self.class_dtype_ = torch.int64
+        self.class_dtype_ = torch.float32
 
-        self.n_classes_ = len(self.classes_)
         self.n_pert_ = 5
 
         if self.batch_size == "auto":
@@ -342,9 +339,9 @@ class SKLearnSemiSLVIME(BaseEstimator):
 
         if self.n_classes_ > 2:
             y_fit = np.zeros([self.n_samples_,self.n_classes_])
-            y_fit[y] = 1
+            y_fit[np.arange(0,y.shape[0]),y] = 1
         else:
-            y_fit = np.array(y_fit)
+            y_fit = np.array(y)
 
         training_X = X[train_idxs]
         val_X = X[val_idxs]
@@ -365,10 +362,10 @@ class SKLearnSemiSLVIME(BaseEstimator):
 
         self.adn_fn_ = self.get_adn_fn_()
 
-        if hasattr(self.encoder,"n_features_in_") == False:
+        if hasattr(self.vime_self_sl,"n_features_in_") == False:
             if self.verbose == True:
                 print("Fitting the encoder (not fitted)")
-            self.encoder.fit(X_unlabelled)
+            self.vime_self_sl.fit(X_unlabelled)
 
         self.model_ = SemiSLVIME(
             self.n_features_fit_,
@@ -383,24 +380,24 @@ class SKLearnSemiSLVIME(BaseEstimator):
         if self.verbose == True:
             pbar = tqdm()
         self.loss_history_ = []
-        for _ in range(self.max_iter):
+        for e in range(self.max_iter):
             # training steps
             for b in range(training_X.shape[0]//self.batch_size_fit_):
                 batch_X,batch_y,batch_X_u,batch_X_u_pert = self.get_data(
                     training_X,training_y,X_unlabelled,sample=True)
-                curr_loss = self.step(
+                curr_loss = self.training_step(
                     batch_X,batch_y,batch_X_u,batch_X_u_pert)
             
             # validation step
             self.model_.eval()
             batch_X,batch_y,batch_X_u,batch_X_u_pert = self.get_data(
-                training_X,training_y,X_unlabelled,sample=True)
+                val_X,val_y,X_unlabelled,sample=True)
             curr_loss_val = self.val_step(
                 batch_X,batch_y,batch_X_u,batch_X_u_pert)
             self.model_.train()
 
             # routine checks
-            curr_loss_val = float(curr_loss_val.detach().cpu().numpy())
+            curr_loss_val = float(curr_loss_val)
             if self.verbose == True:
                 pbar.set_description("Validation loss = {:.4f}".format(
                     curr_loss_val))
@@ -420,7 +417,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
         self.n_features_in_ = self.n_features_
         return self
     
-    def transform(self,X,y=None):
+    def predict(self,X):
         X = check_array(X,accept_large_sparse=False,dtype=None)
         self.model_.eval()
         X = self.pdg_.ad.transform(X)
@@ -428,26 +425,35 @@ class SKLearnSemiSLVIME(BaseEstimator):
         pred = self.last_act_(self.model_(X_tensor))
         self.model_.train()
         output = pred.detach().cpu().numpy()
+        if self.n_classes_ > 2:
+            output = np.argmax(output,axis=1)
+        else:
+            output = np.where(output>0.5,1,0)[:,0]
         return output
 
-    def fit_transform(self,X,y=None):
+    def fit_predict(self,X,y=None):
         self.fit(X)
-        return self.transform(X)
+        return self.predict(X)
 
     def step(self,X,y,X_u,X_u_perturbed):
         # calculate supervised loss
-        self.optimizer_fit_.zero_grad()
         output = self.model_(X)
         loss_sup_value = self.loss_fit_sup_(output,y)
         # calculate unsupervised loss
         out_u = self.model_(X_u)
         out_u_pert = self.model_(X_u_perturbed)
         loss_unsup_value = self.loss_fit_unsup_(
-            torch.cat([out_u for _ in range(self.n_pert_)]),out_u_pert)
-
+            self.last_act_(
+                torch.cat([out_u for _ in range(self.n_pert_)])),
+            self.last_act_(out_u_pert))
+        
         # combine both losses
-        loss_value = loss_sup_value.mean() + loss_unsup_value.mean()
+        loss_value = loss_sup_value.sum() + 0*loss_unsup_value.sum()
+        return loss_value
 
+    def training_step(self,X,y,X_u,X_u_perturbed):
+        self.optimizer_fit_.zero_grad()
+        loss_value = self.step(X,y,X_u,X_u_perturbed)
         loss_value.backward()
         self.optimizer_fit_.step()
         
@@ -456,18 +462,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
         return loss_value_np
 
     def val_step(self,X,y,X_u,X_u_perturbed):
-        # calculate supervised loss
-        output = self.model_(X)
-        loss_sup_value = self.loss_fit_sup_(output,y)
-        # calculate unsupervised loss
-        out_u = self.model_(X_u)
-        out_u_pert = self.model_(X_u_perturbed)
-        loss_unsup_value = self.loss_fit_unsup_(
-            torch.cat([out_u for _ in range(self.n_pert_)]),out_u_pert)
-
-        # combine both losses
-        loss_value = loss_sup_value.mean() + loss_unsup_value.mean()
-        
+        loss_value = self.step(X,y,X_u,X_u_perturbed)
         loss_value_np = loss_value.detach().cpu().numpy()
         
         return loss_value_np
@@ -476,7 +471,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
         return X.softmax(1)
 
     def cross_entropy_with_logits(self,X,y):
-        return F.cross_entropy(X.softmax(1),y)
+        return F.cross_entropy(X,y.float())
 
     def init_loss(self):
         self.loss_fit_unsup_ = F.mse_loss
@@ -497,15 +492,15 @@ class SKLearnSemiSLVIME(BaseEstimator):
     def get_data(self,training_X,training_y,X_unlabelled,sample=True):
         if sample == True:
             idxs_sup = self.sample_batch_idxs(training_X)
-            idxs_uns= self.sample_batch_idxs(X_unlabelled)
+            idxs_uns = self.sample_batch_idxs(X_unlabelled)
             bs = self.batch_size_fit_
         else:
             idxs_sup = None
             idxs_uns = None
             bs = 0
-        batch_X,batch_y,_,_ = self.pdg_(
-            training_X,training_y,bs,0,idxs_sup)
-        batch_X_u,_,batch_X_u_pert,_ = self.pdg_(
+        batch_X,batch_y,_ = self.pdg_.retrieve_n_entries(
+            training_X,training_y,bs,self.pdg_.ad,idxs_sup)
+        batch_X_u,batch_X_u_pert,_ = self.pdg_(
             X_unlabelled,None,bs,self.n_pert_,idxs_uns)
         batch_X = torch.as_tensor(
             batch_X,dtype=torch.float32)
