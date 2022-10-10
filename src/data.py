@@ -39,8 +39,10 @@ def load_scania(return_X_y=None,split="train"):
     # remove cols with more than 20% NA
     X = X[:,np.sum(X=="nan",axis=0)/X.shape[0] < 0.2]
     # remove entries where NA are present
-    X = X[np.sum(X=="nan",axis=1) == 0,:]
+    nan_idx = np.sum(X=="nan",axis=1) == 0
+    X = X[nan_idx,:]
     y = np.array([class_match[l[class_col]] for l in lines]).astype(np.float32)
+    y = y[nan_idx]
     return X,y
 
 def load_sepsis(return_X_y=None,split="train"):

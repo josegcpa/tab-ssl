@@ -19,12 +19,12 @@ from ..data import (load_sepsis,load_scania,load_firewall,load_sensorless)
 dataset_loaders = [
     #load_iris,
     #load_digits,
-    #load_wine,
+    load_wine,
     #load_breast_cancer,
     #load_firewall,
     #load_sensorless,
     #load_sepsis,
-    load_scania
+    #load_scania
     ]
 
 dataset_loaders_split = [
@@ -55,19 +55,19 @@ for dataset_loader in dataset_loaders:
     if n_features // 2 < 5:
         O = n_features
     else:
-        O = n_features // 2
+        O = n_features
     vime = SKLearnSelfSLVIME(
-        [*[n_features for _ in range(5)],O],
-        [n_features for _ in range(7)],
-        [n_features for _ in range(7)],
-        learning_rate=0.001,
-        mask_p=0.2,
+        [*[n_features for _ in range(2)],O],
+        [n_features for _ in range(2)],
+        [n_features for _ in range(2)],
+        learning_rate=0.01,
+        mask_p=0.1,
         max_iter=200,
         n_iter_no_change=5,
         batch_size=n_samples//10,
-        optimizer="adamw",
+        optimizer="rmsprop",
         optimizer_params=[("weight_decay",0.005)],
-        act_fn="swish",
+        act_fn="relu",
         batch_norm=True,
         cat_thresh=ct)
     
@@ -83,6 +83,8 @@ for dataset_loader in dataset_loaders:
         metric = "f1_macro"
     else:
         metric = "f1"
+    
+    print(X.shape,y.shape)
     rf_scores = cross_validate(
         standard_rf,
         X,y,

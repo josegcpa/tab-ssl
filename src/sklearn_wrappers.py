@@ -197,7 +197,8 @@ class SKLearnSelfSLVIME(BaseEstimator):
         self.optimizer_dict_ = {
             "adam":torch.optim.Adam,
             "sgd":torch.optim.SGD,
-            "adamw":torch.optim.AdamW
+            "adamw":torch.optim.AdamW,
+            "rmsprop":torch.optim.RMSprop
         }
         if self.optimizer in self.optimizer_dict_:
             self.optimizer_ = self.optimizer_dict_[self.optimizer]
@@ -517,12 +518,14 @@ class SKLearnSemiSLVIME(BaseEstimator):
         self.optimizer_dict_ = {
             "adam":torch.optim.Adam,
             "sgd":torch.optim.SGD,
-            "adamw":torch.optim.AdamW
+            "adamw":torch.optim.AdamW,
+            "rmsprop":torch.optim.RMSprop
         }
         if self.optimizer in self.optimizer_dict_:
             self.optimizer_ = self.optimizer_dict_[self.optimizer]
         else:
-            raise "Only {} are valid optimizers".format(self.optimizer_dict_.keys())
+            t = "Only {} are valid optimizers".format(self.optimizer_dict_.keys())
+            raise Exception(t)
         self.optimizer_params_ = dict(self.optimizer_params)
         self.optimizer_fit_ = self.optimizer_(
             self.model_.parameters(),self.learning_rate,
