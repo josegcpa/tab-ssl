@@ -23,6 +23,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
                  decoder_structure: Sequence[int],
                  mask_decoder_structure: Sequence[int],
                  act_fn: str="relu",
+                 alpha: float=2.0,
                  batch_norm: bool=False,
                  batch_size: Union[int,str]="auto",
                  validation_fraction: float=0.1,
@@ -42,6 +43,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
         self.decoder_structure = decoder_structure
         self.mask_decoder_structure = mask_decoder_structure
         self.act_fn = act_fn
+        self.alpha = alpha
         self.batch_norm = batch_norm
         self.batch_size = batch_size
         self.validation_fraction = validation_fraction
@@ -133,7 +135,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
             feature_loss_value = self.feature_loss_(
                 output_perturbed,torch.cat([X for _ in range(self.n_pert_)])).sum()
             mask_loss_value = self.mask_loss_(output_masks,masks).sum()
-            curr_loss_val = feature_loss_value + mask_loss_value
+            curr_loss_val = feature_loss_value + self.alpha * mask_loss_value
             self.model_.train()
 
             curr_loss_val = float(curr_loss_val.detach().cpu().numpy())
@@ -177,7 +179,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
             output_perturbed,torch.cat([X for _ in range(self.n_pert_)]))
         mask_loss_value = self.mask_loss_(output_masks,masks)
 
-        loss_value = feature_loss_value.sum() + mask_loss_value.sum()
+        loss_value = feature_loss_value.sum()+self.alpha*mask_loss_value.sum()
 
         loss_value.backward()
         self.optimizer_fit_.step()
@@ -358,7 +360,8 @@ class SKLearnSemiSLVIME(BaseEstimator):
         self.pdg_ = PerturbedDataGenerator(X_for_data_gen,
                                            p=self.mask_p,
                                            cat_thresh=self.cat_thresh,
-                                           cat_cols=self.cat_cols)
+                                           cat_cols=self.cat_cols,
+                                           seed=self.random_state)
         self.n_features_fit_  = self.pdg_.ad.n_col_out_
 
         self.adn_fn_ = self.get_adn_fn_()
@@ -500,7 +503,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
             idxs_uns = None
             bs = 0
         batch_X,batch_y,_ = self.pdg_.retrieve_n_entries(
-            training_X,training_y,bs,self.pdg_.ad,idxs_sup)
+            training_X,training_y,bs,self.pdg_.ad,idxs_sup,self.pdg_.generator)
         batch_X_u,batch_X_u_pert,_ = self.pdg_(
             X_unlabelled,None,bs,self.n_pert_,idxs_uns)
         batch_X = torch.as_tensor(

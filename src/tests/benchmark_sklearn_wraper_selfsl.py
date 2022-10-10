@@ -17,11 +17,11 @@ from ..sklearn_wrappers import SKLearnSelfSLVIME
 from ..data import (load_sepsis,load_scania,load_firewall,load_sensorless)
 
 dataset_loaders = [
-    #load_iris,
-    #load_digits,
+    load_iris,
+    load_digits,
     load_wine,
-    #load_breast_cancer,
-    #load_firewall,
+    load_breast_cancer,
+    load_firewall,
     #load_sensorless,
     #load_sepsis,
     #load_scania
@@ -62,11 +62,12 @@ for dataset_loader in dataset_loaders:
         [n_features for _ in range(2)],
         learning_rate=0.01,
         mask_p=0.1,
+        alpha=2.0,
         max_iter=200,
-        n_iter_no_change=5,
+        n_iter_no_change=10,
         batch_size=n_samples//10,
         optimizer="rmsprop",
-        optimizer_params=[("weight_decay",0.005)],
+        optimizer_params=[("weight_decay",0.)],
         act_fn="relu",
         batch_norm=True,
         cat_thresh=ct)

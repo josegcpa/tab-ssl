@@ -12,26 +12,31 @@ class PerturbedDataGenerator:
                  p:float=0.1,
                  col_names:List[str]=None,
                  cat_thresh:float=0.05,
-                 cat_cols:List[int]=None):
+                 cat_cols:List[int]=None,
+                 seed:int=42):
         self.X = X
         self.y = y
         self.p = p
         self.col_names = col_names
         self.cat_thresh = cat_thresh
         self.cat_cols = cat_cols
+        self.seed = seed
+        self.generator = np.random.default_rng(self.seed)
 
         self.ad = AutoDataset(self.col_names,self.cat_thresh,self.cat_cols)
         self.ad.fit(self.X)
 
     @staticmethod
-    def retrieve_n_entries(X,y=None,n=0,ad=None,idxs=None):
+    def retrieve_n_entries(X,y=None,n=0,ad=None,idxs=None,generator=None):
+        if generator is None:
+            generator = np.random.default_rng()
         r = X.shape[0]
         if idxs is None:
             if n == 0:
                 idxs = np.arange(r)
                 sub_X = X
             else:
-                idxs = np.random.choice(r,n)
+                idxs = generator.choice(r,n)
                 sub_X = X[idxs,:]
         else:
             sub_X = X[idxs,:]
@@ -43,19 +48,21 @@ class PerturbedDataGenerator:
             return sub_X,y[idxs],idxs
 
     @staticmethod
-    def retrieve_perturbed_entries(X,idxs,n,p,ad=None):
+    def retrieve_perturbed_entries(X,idxs,n,p,ad=None,generator=None):
+        if generator is None:
+            generator = np.random.default_rng()
         if ad is not None:
             X = ad.transform(deepcopy(X))
         sub_X = X[idxs,:]
         r = X.shape[0]
         perturbed_entries = []
         masks = []
-        stacked_masks = np.random.binomial(
+        stacked_masks = generator.binomial(
             1,p,size=[*sub_X.shape,n]).astype(bool)
         for i in range(n):
             mask = stacked_masks[:,:,i]
             x,y = np.where(mask)
-            perm_x = np.random.choice(r,len(x))
+            perm_x = generator.choice(r,len(x))
             sub_X[x,y] = X[perm_x,y]
             perturbed_entries.append(sub_X)
             masks.append(mask)
@@ -67,16 +74,18 @@ class PerturbedDataGenerator:
         if y is None and self.y is not None:
             y = self.y
         if y is None:
-            sub_X,idxs = self.retrieve_n_entries(X,y,n,self.ad,idxs)
+            sub_X,idxs = self.retrieve_n_entries(
+                X,y,n,self.ad,idxs,self.generator)
             sub_X_perturbed,masks = self.retrieve_perturbed_entries(
-                X,idxs,n_p,self.p,self.ad)
+                X,idxs,n_p,self.p,self.ad,self.generator)
             return (sub_X,
                     sub_X_perturbed,
                     masks)
         else:
-            sub_X,sub_y,idxs = self.retrieve_n_entries(X,y,n,self.ad)
+            sub_X,sub_y,idxs = self.retrieve_n_entries(
+                X,y,n,self.ad,self.generator)
             sub_X_perturbed,masks = self.retrieve_perturbed_entries(
-                X,idxs,n_p,self.p,self.ad)
+                X,idxs,n_p,self.p,self.ad,self.generator)
             return (sub_X,
                     sub_y,
                     sub_X_perturbed,
