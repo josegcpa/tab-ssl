@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+import os
 
 def load_firewall(return_X_y=None):
     path = "data/firewall/log2.csv"
@@ -59,3 +61,14 @@ def load_sepsis(return_X_y=None,split="train"):
     X = np.array(X)
     y = np.array([class_match[l[class_col]] for l in lines]).astype(np.float32)
     return X,y
+    
+def load_data(name):
+    print("> Opening: ", name)
+
+    path = os.path.join('data/open_ml', name)
+    df = pd.read_csv(path)
+
+    y = df['class']
+    X = df.drop(columns=['class'])
+
+    return X.values, y.values
