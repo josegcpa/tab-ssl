@@ -95,6 +95,25 @@ class SKLearnSelfSLVIME(BaseEstimator):
                                            p=self.mask_p,
                                            cat_thresh=self.cat_thresh,
                                            cat_cols=self.cat_cols)
+
+        training_X,perturbed_training_X,training_masks = self.pdg_(
+            training_X,None,0,self.n_pert_,None)
+        training_X = torch.as_tensor(
+            training_X,dtype=torch.float32)
+        perturbed_training_X = torch.as_tensor(
+            perturbed_training_X,dtype=torch.float32)
+        training_masks = torch.as_tensor(
+            training_masks,dtype=torch.float32)
+
+        val_X,perturbed_val_X,val_masks = self.pdg_(
+            val_X,None,0,self.n_pert_,None)
+        val_X = torch.as_tensor(
+            val_X,dtype=torch.float32)
+        perturbed_val_X = torch.as_tensor(
+            perturbed_val_X,dtype=torch.float32)
+        val_masks = torch.as_tensor(
+            val_masks,dtype=torch.float32)
+
         self.n_features_fit_  = self.pdg_.ad.n_col_out_
 
         self.feature_loss_ = FeatureDecoderLoss(
@@ -115,26 +134,22 @@ class SKLearnSelfSLVIME(BaseEstimator):
         if self.verbose == True:
             pbar = tqdm()
         self.loss_history_ = []
+        self.change_accum_ = []
         for _ in range(self.max_iter):
             for b in range(training_X.shape[0]//self.batch_size_fit_):
-                batch_idxs = self.sample_batch_idxs(training_X)
-                batch_X,batch_X_perturbed,masks = self.pdg_(
-                    None,None,self.batch_size_fit_,self.n_pert_,batch_idxs)
-                batch_X = torch.as_tensor(batch_X,dtype=torch.float32)
-                batch_X_perturbed = torch.as_tensor(
-                    batch_X_perturbed,dtype=torch.float32)
-                masks = torch.as_tensor(masks,dtype=torch.float32)
+                batch_idxs = self.sample_batch_idxs(perturbed_training_X)
+                batch_idxs_original = batch_idxs % training_X.shape[0]
+                batch_X = training_X[batch_idxs_original]
+                batch_X_perturbed = perturbed_training_X[batch_idxs]
+                masks = training_masks[batch_idxs]
                 curr_loss = self.step(
                     batch_X,batch_X_perturbed,masks)
+
             self.model_.eval()
-            X,X_perturbed,masks = self.pdg_(val_X,None,0,self.n_pert_)
-            X = torch.as_tensor(X,dtype=torch.float32)
-            X_perturbed = torch.as_tensor(X_perturbed,dtype=torch.float32)
-            masks = torch.as_tensor(masks,dtype=torch.float32)
-            output_perturbed,output_masks = self.model_(X_perturbed)
+            output_perturbed,output_masks = self.model_(perturbed_val_X)
             feature_loss_value = self.feature_loss_(
-                output_perturbed,torch.cat([X for _ in range(self.n_pert_)])).sum()
-            mask_loss_value = self.mask_loss_(output_masks,masks).sum()
+                output_perturbed,torch.cat([val_X for _ in range(self.n_pert_)])).sum()
+            mask_loss_value = self.mask_loss_(output_masks,val_masks).sum()
             curr_loss_val = feature_loss_value + self.alpha * mask_loss_value
             self.model_.train()
 
@@ -146,14 +161,21 @@ class SKLearnSelfSLVIME(BaseEstimator):
             if self.reduce_lr_on_plateau == True:
                 self.scheduler.step(curr_loss_val)
             self.loss_history_.append(curr_loss_val)
-            if len(self.loss_history_) > self.n_iter_no_change:
-                x = np.arange(0,self.n_iter_no_change)
-                y = self.loss_history_[-self.n_iter_no_change:]
+
+            N = np.minimum(self.n_iter_no_change,10)
+            if len(self.loss_history_) > N:
+                x = np.arange(0,N)
+                y = self.loss_history_[-N:]
                 lm = linregress(x,y)
-                if lm[0] > 0:
-                    if self.verbose == True:
-                        print("\nEarly stopping criteria reached")
-                    break
+                if lm[2] > 0:
+                    self.change_accum_.append(1)
+                else:
+                    self.change_accum_.append(0)
+                if len(self.change_accum_) > self.n_iter_no_change:
+                    if np.mean(self.change_accum_) > 0.5:
+                        if self.verbose == True:
+                            print("\nEarly stopping criteria reached")
+                        break
 
         self.n_features_in_ = self.n_features_
         return self
@@ -175,8 +197,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
     def step(self,X,X_perturbed,masks):
         self.optimizer_fit_.zero_grad()
         output_perturbed,output_masks = self.model_(X_perturbed)
-        feature_loss_value = self.feature_loss_(
-            output_perturbed,torch.cat([X for _ in range(self.n_pert_)]))
+        feature_loss_value = self.feature_loss_(output_perturbed,X)
         mask_loss_value = self.mask_loss_(output_masks,masks)
 
         loss_value = feature_loss_value.sum()+self.alpha*mask_loss_value.sum()

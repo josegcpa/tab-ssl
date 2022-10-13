@@ -22,9 +22,9 @@ dataset_loaders = [
     load_wine,
     load_breast_cancer,
     load_firewall,
-    #load_sensorless,
-    #load_sepsis,
-    #load_scania
+    load_sensorless,
+    load_sepsis,
+    load_scania
     ]
 
 dataset_loaders_split = [
@@ -57,27 +57,28 @@ for dataset_loader in dataset_loaders:
     else:
         O = n_features
     vime = SKLearnSelfSLVIME(
-        [*[n_features for _ in range(2)],O],
-        [n_features for _ in range(2)],
-        [n_features for _ in range(2)],
+        [*[n_features for _ in range(1)],O],
+        [n_features for _ in range(1)],
+        [n_features for _ in range(1)],
         learning_rate=0.01,
-        mask_p=0.1,
+        mask_p=0.2,
         alpha=2.0,
-        max_iter=200,
-        n_iter_no_change=10,
-        batch_size=n_samples//10,
+        max_iter=2000,
+        n_iter_no_change=50,
+        batch_size=n_samples//5,
         optimizer="rmsprop",
-        optimizer_params=[("weight_decay",0.)],
+        optimizer_params=[("weight_decay",0.005)],
         act_fn="relu",
         batch_norm=True,
+        verbose=True,
         cat_thresh=ct)
     
     standard_rf = Pipeline([
         ("preprocessing",AutoDataset(cat_thresh=ct)),
-        ("estimator",SGDClassifier(penalty="elasticnet",random_state=random_state))])
+        ("estimator",RandomForestClassifier(random_state=random_state))])
     vime_rf = Pipeline([
         ("preprocessing",vime),
-        ("estimator",SGDClassifier(penalty="elasticnet",random_state=random_state))])
+        ("estimator",RandomForestClassifier(random_state=random_state))])
 
     print(dataset_loader.__name__,n_samples,n_features)
     if len(np.unique(y)) > 2:
@@ -85,7 +86,6 @@ for dataset_loader in dataset_loaders:
     else:
         metric = "f1"
     
-    print(X.shape,y.shape)
     rf_scores = cross_validate(
         standard_rf,
         X,y,
@@ -99,9 +99,9 @@ for dataset_loader in dataset_loaders:
         scoring=metric,
         n_jobs=1)
 
-    print("Classifier scores = {} (std.err.={})".format(
+    print("\tClassifier scores = {} (std.err.={})".format(
         np.mean(rf_scores["test_score"]),
         np.std(rf_scores["test_score"])))
-    print("VIME + classifier forest scores = {} (std.err.={})".format(
+    print("\tVIME + classifier scores = {} (std.err.={})".format(
           np.mean(vime_rf_scores["test_score"]),
           np.std(vime_rf_scores["test_score"])))
