@@ -6,8 +6,8 @@ import sys
 
 open_ml_api_key = sys.argv[1]
 
-os.makedirs("data",exist_ok=True)
-os.makedirs("data/open_ml",exist_ok=True)
+os.makedirs("../data",exist_ok=True)
+os.makedirs("../data/open_ml",exist_ok=True)
 
 openml.config.apikey = open_ml_api_key  # set the OpenML Api Key
 
@@ -28,4 +28,4 @@ for SUITE_ID in SUITE_IDS:
             dataset_format="dataframe", target=dataset.default_target_attribute
         )
         X.insert(loc=0, column='class', value=y)
-        X.to_csv("data/open_ml/{}.csv".format(dataset.name),index=False)
+        X.to_csv("../data/open_ml/{}.csv".format(dataset.name),index=False)
