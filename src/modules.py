@@ -1,6 +1,7 @@
 import torch
 
 from typing import List,Sequence,Callable
+from .losses import SuperviseContrastiveLoss
 
 activation_factory = {
     "identity": torch.nn.Identity,
@@ -128,7 +129,7 @@ class SemiSLVIME(torch.nn.Module):
             self.adn_fn(self.predictor_structure[-1]),
             torch.nn.Linear(self.predictor_structure[-1],self.n_outputs))
 
-    def forward(self,X):
+    def forward(self, X):
         with torch.no_grad():
             enc_out = self.encoder.encoder(X)
         return self.predictor(enc_out)
@@ -136,17 +137,24 @@ class SemiSLVIME(torch.nn.Module):
 
 class AE(torch.nn.Module):
     def __init__(self,
-                 input_dim,
-                 hidden_dim=[128, ],
-                 num_layers=None,
-                 num_classes=0.0,
-                 ):
+                 n_input_features: int,
+                 encoder_structure: Sequence[int],
+                 decoder_structure: Sequence[int]):
         super().__init__()
+        self.n_input_features = n_input_features
+        self.encoder_structure = encoder_structure
+        self.decoder_structure = decoder_structure
 
-        # Define the hidden dimensionality of the AE
-        hidden_dim = [int(hidden_dim), ]
-        if num_layers is not None:
-            hidden_dim = hidden_dim * num_layers
+        self.encoder = AE_block(self.n_input_features,
+                           self.encoder_structure)
+        self.decoder = AE_block(self.encoder_structure[-1],
+                           [*self.decoder_structure,self.n_input_features])
+
+    def forward(self, data):
+        o_enc = self.encoder(data)
+        o_dec = self.decoder(o_enc)
+
+        return o_enc, o_dec
 
 
 class Predictor(torch.nn.Module):
@@ -170,7 +178,7 @@ class Predictor(torch.nn.Module):
                 torch.nn.Sequential(
                     torch.nn.Linear(curr, s),
                     torch.nn.BatchNorm1d(curr),
-                    torch.nn.ReLU(inplace=True)
+                    torch.nn.ReLU()
                 )
             )
             curr = s
@@ -184,3 +192,69 @@ class Predictor(torch.nn.Module):
 
     def forward(self, x):
         return self.op(x)
+
+
+class AE_block(torch.nn.Module):
+    def __init__(self,
+                 n_input_features: int,
+                 structure: Sequence[int]):
+        super().__init__()
+        self.n_input_features = n_input_features
+        self.structure = structure
+
+        self.create_block()
+
+    def create_block(self):
+        self.layers = torch.nn.ModuleList([])
+        curr = self.n_input_features
+        for s in self.structure[:-1]:
+            self.layers.append(
+                torch.nn.Sequential(
+                    torch.nn.Linear(curr, s),
+                    torch.nn.ReLU(),
+                )
+            )
+            curr = s
+        s = self.structure[-1]
+        self.layers.append(
+            torch.nn.Sequential(
+                torch.nn.Linear(curr, s)))
+        self.op = torch.nn.Sequential(*self.layers)
+
+    def forward(self, x):
+        return self.op(x)
+
+class ContrastiveMixup(torch.nn.Module):
+    def __init__(self,
+                 labeled_X: Sequence[float],
+                 unlabeled_X: Sequence[float],
+                 labels: Sequence[int],
+                 n_classes: int,
+                 n_input_features: int,
+                 encoder_structure: Sequence[int],
+                 decoder_structure: Sequence[int]):
+        super().__init__()
+
+        # data
+        self.x = labeled_X
+        self.u_x = unlabeled_X
+        self.y = labels
+        self.p_y = None # pseudo labels
+
+        # autoencoder modules
+        self.n_input_features = n_input_features
+        self.encoder_structure = encoder_structure
+        self.decoder_structure = decoder_structure
+
+        self.AE =AE(self.n_input_features, self.encoder_structure, self.decoder_structure)
+
+        # Predictor MLP
+
+        self.Predictor = Predictor(self.n_input_features, [100,100], n_classes)
+
+        self.scl = SuperviseContrastiveLoss()
+
+
+
+
+

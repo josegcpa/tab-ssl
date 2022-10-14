@@ -1,5 +1,5 @@
-from modules import Predictor
+from modules import AE
 
-model = Predictor(10, [10,20,30], 2)
+model = AE(50, [50,25],[25,50])
 
 print(model)
