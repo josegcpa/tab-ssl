@@ -132,3 +132,55 @@ class SemiSLVIME(torch.nn.Module):
         with torch.no_grad():
             enc_out = self.encoder.encoder(X)
         return self.predictor(enc_out)
+
+
+class AE(torch.nn.Module):
+    def __init__(self,
+                 input_dim,
+                 hidden_dim=[128, ],
+                 num_layers=None,
+                 num_classes=0.0,
+                 ):
+        super().__init__()
+
+        # Define the hidden dimensionality of the AE
+        hidden_dim = [int(hidden_dim), ]
+        if num_layers is not None:
+            hidden_dim = hidden_dim * num_layers
+
+
+class Predictor(torch.nn.Module):
+    def __init__(self,
+                 n_input_features: int,
+                 structure: Sequence[int],
+                 n_classes: int,
+                ):
+        super().__init__()
+        self.n_input_features = n_input_features
+        self.structure = structure
+        self.n_classes = n_classes
+
+        self.setup_structure()
+
+    def setup_structure(self):
+        self.layers = torch.nn.ModuleList([])
+        curr = self.n_input_features
+        for s in self.structure:
+            self.layers.append(
+                torch.nn.Sequential(
+                    torch.nn.Linear(curr, s),
+                    torch.nn.BatchNorm1d(curr),
+                    torch.nn.ReLU(inplace=True)
+                )
+            )
+            curr = s
+        self.layers.append(
+            torch.nn.Sequential(
+                torch.nn.Linear(curr, self.n_classes),
+                torch.nn.Softmax(),
+            )
+        )
+        self.op = torch.nn.Sequential(*self.layers)
+
+    def forward(self, x):
+        return self.op(x)
