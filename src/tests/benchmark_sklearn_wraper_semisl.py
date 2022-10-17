@@ -14,7 +14,7 @@ from typing import List
 
 from ..data_generator import AutoDataset
 from ..sklearn_wrappers import SKLearnSelfSLVIME,SKLearnSemiSLVIME
-from ..data import (load_sepsis,load_scania,load_firewall,load_sensorless)
+from ..data import (load_sepsis, load_scania, load_firewall, load_sensorless)
 
 dataset_loaders = [
     #load_iris,

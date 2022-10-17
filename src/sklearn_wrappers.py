@@ -12,9 +12,9 @@ from tqdm import tqdm
 
 from typing import Sequence,Union,List
 
-from .modules import SelfSLVIME,SemiSLVIME,activation_factory, Predictor, AE
+from .modules import SelfSLVIME,SemiSLVIME, SelfSLContrastive ,activation_factory, Predictor, AE, EmbeddingGenerator
 from .losses import FeatureDecoderLoss, SuperviseContrastiveLoss
-from.data_generator import PerturbedDataGenerator, EmbeddingGenerator
+from.data_generator import PerturbedDataGenerator, get_cat_info
 
 # TODO: tests for semi-supervised method
 
@@ -592,8 +592,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
 
 class SKLearnSelfSLContrastive(BaseEstimator):
     def __init__(self,
-                 encoder_structure: Sequence[int],
-                 decoder_structure: Sequence[int],
+                 hidden_dim: Sequence[int] = [128, ],
                  act_fn: str = "relu",
                  alpha: float = 2.0,
                  batch_norm: bool = False,
@@ -609,10 +608,10 @@ class SKLearnSelfSLContrastive(BaseEstimator):
                  optimizer_params: tuple = tuple([]),
                  n_iter_no_change: int = 1e6,
                  cat_cols: List[int] = None,
+                 embed: bool = False,
                  verbose: bool = False):
         super().__init__()
-        self.encoder_structure = encoder_structure
-        self.decoder_structure = decoder_structure
+        self.hidden_dim = hidden_dim
         self.act_fn = act_fn
         self.alpha = alpha
         self.batch_norm = batch_norm
@@ -628,6 +627,7 @@ class SKLearnSelfSLContrastive(BaseEstimator):
         self.optimizer_params = optimizer_params
         self.n_iter_no_change = n_iter_no_change
         self.cat_cols = cat_cols
+        self.embed = embed
         self.verbose = verbose
 
     def get_adn_fn_(self):
@@ -662,31 +662,22 @@ class SKLearnSelfSLContrastive(BaseEstimator):
         training_X = X[train_idxs]
         val_X = X[val_idxs]
 
-        #TODO: function to calculate cat_dims and cat_index
-        self.embeddings = EmbeddingGenerator(training_X.shape[-1], cat_dims, cat_idxs)
+        cat_idxs, cat_dims = get_cat_info(X)
+        if self.embed:
+            embeddings = EmbeddingGenerator(X.shape[-1], cat_dims, cat_idxs)
+        else:
+            embeddings = EmbeddingGenerator(X.shape[-1], [], [])
 
-        self.pdg_ = PerturbedDataGenerator(training_X,
-                                           p=self.mask_p,
-                                           cat_thresh=self.cat_thresh,
-                                           cat_cols=self.cat_cols)
+        post_embed_dim = embeddings.post_embed_dim
 
-        training_X, perturbed_training_X, training_masks = self.pdg_(
-            training_X, None, 0, self.n_pert_, None)
+        hidden_dim = [post_embed_dim] + self.hidden_dim
+
         training_X = torch.as_tensor(
             training_X, dtype=torch.float32)
-        perturbed_training_X = torch.as_tensor(
-            perturbed_training_X, dtype=torch.float32)
-        training_masks = torch.as_tensor(
-            training_masks, dtype=torch.float32)
 
-        val_X, perturbed_val_X, val_masks = self.pdg_(
-            val_X, None, 0, self.n_pert_, None)
         val_X = torch.as_tensor(
             val_X, dtype=torch.float32)
-        perturbed_val_X = torch.as_tensor(
-            perturbed_val_X, dtype=torch.float32)
-        val_masks = torch.as_tensor(
-            val_masks, dtype=torch.float32)
+
 
         self.n_features_fit_ = self.pdg_.ad.n_col_out_
 
@@ -694,14 +685,18 @@ class SKLearnSelfSLContrastive(BaseEstimator):
             self.pdg_.ad.cat_cols_out_)
         self.mask_loss_ = F.binary_cross_entropy_with_logits
 
-        self.adn_fn_ = self.get_adn_fn_()
+        # TODO: fix encoder/decoder
 
-        self.model_ = SelfSLVIME(
-            self.n_features_fit_,
-            self.encoder_structure,
-            self.decoder_structure,
-            self.mask_decoder_structure,
-            self.adn_fn_)
+        # - encoder
+        self.encoder = torch.nn.ModuleList()
+        self.encoder.append(self.embeddings)
+        for i in range(1, len(hidden_dim)):
+            self.encoder.append(
+                torch.nn.Sequential(
+                    torch.nn.Linear(hidden_dim[i - 1], hidden_dim[i]),
+                    torch.nn.ReLU()
+                )
+            )
 
         self.init_optim()
 
