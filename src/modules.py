@@ -224,11 +224,40 @@ class AE_block(torch.nn.Module):
     def forward(self, x):
         return self.op(x)
 
-class ContrastiveMixup(torch.nn.Module):
+
+class SelfSLContrastive(torch.nn.Module):
     def __init__(self,
-                 labeled_X: Sequence[float],
-                 unlabeled_X: Sequence[float],
-                 labels: Sequence[int],
+                 n_input_features: int,
+                 encoder_structure: Sequence[int],
+                 decoder_structure: Sequence[int],
+                 adn_fn: Callable = torch.nn.Identity):
+        super().__init__()
+        self.n_input_features = n_input_features
+        self.encoder_structure = encoder_structure
+        self.decoder_structure = decoder_structure
+        self.adn_fn = adn_fn
+
+        self.encoder = MLP(self.n_input_features,
+                           self.encoder_structure,
+                           self.adn_fn)
+        self.decoder = MLP(self.encoder_structure[-1],
+                           [*self.decoder_structure, self.n_input_features],
+                           self.adn_fn)
+
+    def get_params(self):
+        return {
+            "n_input_features": self.n_input_features,
+            "encoder_structure": self.encoder_structure,
+            "decoder_structure": self.decoder_structure,
+            "adn_fn": self.adn_fn, }
+
+    def forward(self, X):
+        enc_out = self.encoder(X)
+        dec_out = self.decoder(enc_out)
+        return dec_out
+
+class ContrastiveMixupSelfSL(torch.nn.Module):
+    def __init__(self,
                  n_classes: int,
                  n_input_features: int,
                  encoder_structure: Sequence[int],
@@ -236,10 +265,6 @@ class ContrastiveMixup(torch.nn.Module):
         super().__init__()
 
         # data
-        self.x = labeled_X
-        self.u_x = unlabeled_X
-        self.y = labels
-        self.p_y = None # pseudo labels
 
         # autoencoder modules
         self.n_input_features = n_input_features
@@ -252,7 +277,74 @@ class ContrastiveMixup(torch.nn.Module):
 
         self.Predictor = Predictor(self.n_input_features, [100,100], n_classes)
 
+        # Losses and associated parameters
         self.scl = SuperviseContrastiveLoss()
+        self.ce = torch.nn.CrossEntropyLoss()
+
+        self.batch_size = batch_size
+        self.gama = gamma #0.1
+        self.max_iter = max_iter
+
+    def fit(self, X, y, X_unlabelled=None):
+        X = check_array(X, ensure_min_samples=2, accept_large_sparse=False,
+                        dtype=None)
+        self.n_samples_ = X.shape[0]
+        self.n_features_ = X.shape[1]
+
+        training_X, val_X, training_y, val_y = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        training_X_unlabeled, val_X_unlabeled = train_test_split(X_unlabelled, test_size=0.3, random_state=42)
+
+        # 2X batch size for mixup
+        self.batch_size_fit_ = 2*self.batch_size
+
+        if self.verbose == True:
+            pbar = tqdm()
+        self.loss_history_ = []
+
+        for _ in range(self.max_iter):
+            for b in range(training_X.shape[0]//self.batch_size_fit_):
+                batch_idxs = self.sample_batch_idxs(perturbed_training_X)
+                batch_idxs_original = batch_idxs % training_X.shape[0]
+                batch_X = training_X[batch_idxs_original]
+                batch_X_perturbed = perturbed_training_X[batch_idxs]
+                masks = training_masks[batch_idxs]
+                curr_loss = self.step(
+                    batch_X,batch_X_perturbed,masks)
+
+            self.model_.eval()
+            output_perturbed,output_masks = self.model_(perturbed_val_X)
+            feature_loss_value = self.feature_loss_(
+                output_perturbed,torch.cat([val_X for _ in range(self.n_pert_)])).sum()
+            mask_loss_value = self.mask_loss_(output_masks,val_masks).sum()
+            curr_loss_val = feature_loss_value + self.alpha * mask_loss_value
+            self.model_.train()
+
+            curr_loss_val = float(curr_loss_val.detach().cpu().numpy())
+            if self.verbose == True:
+                pbar.set_description("Validation loss = {:.4f}".format(
+                    curr_loss_val))
+                pbar.update()
+            if self.reduce_lr_on_plateau == True:
+                self.scheduler.step(curr_loss_val)
+            self.loss_history_.append(curr_loss_val)
+
+            N = np.minimum(self.n_iter_no_change,10)
+            if len(self.loss_history_) > N:
+                x = np.arange(0,N)
+                y = self.loss_history_[-N:]
+                lm = linregress(x,y)
+                if lm[2] > 0:
+                    self.change_accum_.append(1)
+                else:
+                    self.change_accum_.append(0)
+                if len(self.change_accum_) > self.n_iter_no_change:
+                    if np.mean(self.change_accum_) > 0.5:
+                        if self.verbose == True:
+                            print("\nEarly stopping criteria reached")
+                        break
+
+        self.n_features_in_ = self.n_features_
+        return self
 
 
 

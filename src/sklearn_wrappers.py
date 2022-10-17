@@ -6,14 +6,15 @@ from scipy.stats import linregress
 from sklearn.utils import check_array, check_random_state
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.class_weight import compute_class_weight
+from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
 from typing import Sequence,Union,List
 
-from .modules import SelfSLVIME,SemiSLVIME,activation_factory
-from .losses import FeatureDecoderLoss
-from.data_generator import PerturbedDataGenerator
+from .modules import SelfSLVIME,SemiSLVIME,activation_factory, Predictor, AE
+from .losses import FeatureDecoderLoss, SuperviseContrastiveLoss
+from.data_generator import PerturbedDataGenerator, EmbeddingGenerator
 
 # TODO: tests for semi-supervised method
 
@@ -587,3 +588,355 @@ class SKLearnSemiSLVIME(BaseEstimator):
             "optimizer_params": self.optimizer_params,
             "n_iter_no_change": self.n_iter_no_change,
             "verbose": self.verbose}
+
+
+class SKLearnSelfSLContrastive(BaseEstimator):
+    def __init__(self,
+                 encoder_structure: Sequence[int],
+                 decoder_structure: Sequence[int],
+                 act_fn: str = "relu",
+                 alpha: float = 2.0,
+                 batch_norm: bool = False,
+                 batch_size: Union[int, str] = "auto",
+                 validation_fraction: float = 0.1,
+                 max_iter: int = 100,
+                 mask_p: float = 0.1,
+                 cat_thresh: float = 0.05,
+                 random_state: int = 42,
+                 learning_rate: float = 0.01,
+                 reduce_lr_on_plateau: bool = True,
+                 optimizer: str = "adam",
+                 optimizer_params: tuple = tuple([]),
+                 n_iter_no_change: int = 1e6,
+                 cat_cols: List[int] = None,
+                 verbose: bool = False):
+        super().__init__()
+        self.encoder_structure = encoder_structure
+        self.decoder_structure = decoder_structure
+        self.act_fn = act_fn
+        self.alpha = alpha
+        self.batch_norm = batch_norm
+        self.batch_size = batch_size
+        self.validation_fraction = validation_fraction
+        self.max_iter = max_iter
+        self.mask_p = mask_p
+        self.cat_thresh = cat_thresh
+        self.random_state = random_state
+        self.learning_rate = learning_rate
+        self.reduce_lr_on_plateau = reduce_lr_on_plateau
+        self.optimizer = optimizer
+        self.optimizer_params = optimizer_params
+        self.n_iter_no_change = n_iter_no_change
+        self.cat_cols = cat_cols
+        self.verbose = verbose
+
+    def get_adn_fn_(self):
+        if self.batch_norm == True:
+            def adn_fn(n):
+                return torch.nn.Sequential(
+                    activation_factory[self.act_fn](),
+                    torch.nn.BatchNorm1d(n))
+        else:
+            def adn_fn(n):
+                return activation_factory[self.act_fn]()
+        return adn_fn
+
+    def fit(self, X, y=None):
+        X = check_array(X, ensure_min_samples=2, accept_large_sparse=False,
+                        dtype=None)
+        self.n_samples_ = X.shape[0]
+        self.n_features_ = X.shape[1]
+        self.n_pert_ = 5
+
+        if self.batch_size == "auto":
+            self.batch_size_fit_ = np.minimum(200, self.n_samples_)
+        else:
+            self.batch_size_fit_ = self.batch_size
+
+        val_idxs = self.sample_batch_idxs(
+            X, int(self.n_samples_ * self.validation_fraction))
+        train_idxs = [
+            i for i in range(self.n_samples_)
+            if i not in val_idxs]
+
+        training_X = X[train_idxs]
+        val_X = X[val_idxs]
+
+        #TODO: function to calculate cat_dims and cat_index
+        self.embeddings = EmbeddingGenerator(training_X.shape[-1], cat_dims, cat_idxs)
+
+        self.pdg_ = PerturbedDataGenerator(training_X,
+                                           p=self.mask_p,
+                                           cat_thresh=self.cat_thresh,
+                                           cat_cols=self.cat_cols)
+
+        training_X, perturbed_training_X, training_masks = self.pdg_(
+            training_X, None, 0, self.n_pert_, None)
+        training_X = torch.as_tensor(
+            training_X, dtype=torch.float32)
+        perturbed_training_X = torch.as_tensor(
+            perturbed_training_X, dtype=torch.float32)
+        training_masks = torch.as_tensor(
+            training_masks, dtype=torch.float32)
+
+        val_X, perturbed_val_X, val_masks = self.pdg_(
+            val_X, None, 0, self.n_pert_, None)
+        val_X = torch.as_tensor(
+            val_X, dtype=torch.float32)
+        perturbed_val_X = torch.as_tensor(
+            perturbed_val_X, dtype=torch.float32)
+        val_masks = torch.as_tensor(
+            val_masks, dtype=torch.float32)
+
+        self.n_features_fit_ = self.pdg_.ad.n_col_out_
+
+        self.feature_loss_ = FeatureDecoderLoss(
+            self.pdg_.ad.cat_cols_out_)
+        self.mask_loss_ = F.binary_cross_entropy_with_logits
+
+        self.adn_fn_ = self.get_adn_fn_()
+
+        self.model_ = SelfSLVIME(
+            self.n_features_fit_,
+            self.encoder_structure,
+            self.decoder_structure,
+            self.mask_decoder_structure,
+            self.adn_fn_)
+
+        self.init_optim()
+
+        if self.verbose == True:
+            pbar = tqdm()
+        self.loss_history_ = []
+        self.change_accum_ = []
+        for _ in range(self.max_iter):
+            for b in range(training_X.shape[0] // self.batch_size_fit_):
+                batch_idxs = self.sample_batch_idxs(perturbed_training_X)
+                batch_idxs_original = batch_idxs % training_X.shape[0]
+                batch_X = training_X[batch_idxs_original]
+                batch_X_perturbed = perturbed_training_X[batch_idxs]
+                masks = training_masks[batch_idxs]
+                curr_loss = self.step(
+                    batch_X, batch_X_perturbed, masks)
+
+            self.model_.eval()
+            output_perturbed, output_masks = self.model_(perturbed_val_X)
+            feature_loss_value = self.feature_loss_(
+                output_perturbed, torch.cat([val_X for _ in range(self.n_pert_)])).sum()
+            mask_loss_value = self.mask_loss_(output_masks, val_masks).sum()
+            curr_loss_val = feature_loss_value + self.alpha * mask_loss_value
+            self.model_.train()
+
+            curr_loss_val = float(curr_loss_val.detach().cpu().numpy())
+            if self.verbose == True:
+                pbar.set_description("Validation loss = {:.4f}".format(
+                    curr_loss_val))
+                pbar.update()
+            if self.reduce_lr_on_plateau == True:
+                self.scheduler.step(curr_loss_val)
+            self.loss_history_.append(curr_loss_val)
+
+            N = np.minimum(self.n_iter_no_change, 10)
+            if len(self.loss_history_) > N:
+                x = np.arange(0, N)
+                y = self.loss_history_[-N:]
+                lm = linregress(x, y)
+                if lm[2] > 0:
+                    self.change_accum_.append(1)
+                else:
+                    self.change_accum_.append(0)
+                if len(self.change_accum_) > self.n_iter_no_change:
+                    if np.mean(self.change_accum_) > 0.5:
+                        if self.verbose == True:
+                            print("\nEarly stopping criteria reached")
+                        break
+
+        self.n_features_in_ = self.n_features_
+        return self
+
+    def transform(self, X, y=None):
+        X = check_array(X, accept_large_sparse=False, dtype=None)
+        self.model_.eval()
+        X = self.pdg_.ad.transform(X)
+        X_tensor = torch.as_tensor(X, dtype=torch.float32)
+        pred = self.model_.encoder(X_tensor)
+        self.model_.train()
+        output = pred.detach().cpu().numpy()
+        return output
+
+    def fit_transform(self, X, y=None):
+        self.fit(X)
+        return self.transform(X)
+
+    def step(self, X, X_perturbed, masks):
+        self.optimizer_fit_.zero_grad()
+        output_perturbed, output_masks = self.model_(X_perturbed)
+        feature_loss_value = self.feature_loss_(output_perturbed, X)
+        mask_loss_value = self.mask_loss_(output_masks, masks)
+
+        loss_value = feature_loss_value.sum() + self.alpha * mask_loss_value.sum()
+
+        loss_value.backward()
+        self.optimizer_fit_.step()
+
+        loss_value_np = loss_value.detach().cpu().numpy()
+
+        return loss_value_np
+
+    def sample_batch_idxs(self, X, batch_size=None):
+        if batch_size is None:
+            batch_size = self.batch_size_fit_
+        random_state = check_random_state(self.random_state)
+        i = random_state.randint(X.shape[0], size=batch_size)
+        return i
+
+    def init_optim(self):
+        self.optimizer_dict_ = {
+            "adam": torch.optim.Adam,
+            "sgd": torch.optim.SGD,
+            "adamw": torch.optim.AdamW,
+            "rmsprop": torch.optim.RMSprop
+        }
+        if self.optimizer in self.optimizer_dict_:
+            self.optimizer_ = self.optimizer_dict_[self.optimizer]
+        else:
+            raise "Only {} are valid optimizers".format(self.optimizer_dict_.keys())
+        self.optimizer_params_ = dict(self.optimizer_params)
+        self.optimizer_fit_ = self.optimizer_(
+            self.model_.parameters(), self.learning_rate,
+            **self.optimizer_params_)
+        if self.reduce_lr_on_plateau == True:
+            self.scheduler = ReduceLROnPlateau(
+                self.optimizer_fit_, 'min', patience=self.n_iter_no_change,
+                verbose=self.verbose, min_lr=self.learning_rate / 1000)
+
+    def set_params(self, **param_dict):
+        original_param_dict = self.get_params()
+        for k in param_dict:
+            if k in original_param_dict:
+                original_param_dict[k] = param_dict[k]
+            else:
+                raise Exception("{} not a valid parameter key".format(k))
+        self.__init__(**original_param_dict)
+        return self
+
+    def get_params(self, deep=None):
+        return {
+            "encoder_structure": self.encoder_structure,
+            "decoder_structure": self.decoder_structure,
+            "mask_decoder_structure": self.mask_decoder_structure,
+            "act_fn": self.act_fn,
+            "batch_norm": self.batch_norm,
+            "batch_size": self.batch_size,
+            "validation_fraction": self.validation_fraction,
+            "max_iter": self.max_iter,
+            "mask_p": self.mask_p,
+            "cat_thresh": self.cat_thresh,
+            "random_state": self.random_state,
+            "learning_rate": self.learning_rate,
+            "optimizer": self.optimizer,
+            "reduce_lr_on_plateau": self.reduce_lr_on_plateau,
+            "optimizer_params": self.optimizer_params,
+            "n_iter_no_change": self.n_iter_no_change,
+            "verbose": self.verbose}
+
+class SKLearnContrastiveMixup(BaseEstimator):
+    def __init__(self,
+                 labeled_X: Sequence[float],
+                 unlabeled_X: Sequence[float],
+                 labels: Sequence[int],
+                 n_classes: int,
+                 n_input_features: int,
+                 encoder_structure: Sequence[int],
+                 decoder_structure: Sequence[int],
+                 batch_size: int,
+                 gamma: float,
+                 max_iter: int):
+        super().__init__()
+
+        # data
+        self.x = labeled_X
+        self.u_x = unlabeled_X
+        self.y = labels
+        self.p_y = None # pseudo labels
+
+        # autoencoder modules
+        self.n_input_features = n_input_features
+        self.encoder_structure = encoder_structure
+        self.decoder_structure = decoder_structure
+
+        self.AE =AE(self.n_input_features, self.encoder_structure, self.decoder_structure)
+
+        # Predictor MLP
+
+        self.Predictor = Predictor(self.n_input_features, [100,100], n_classes)
+
+        # Losses and associated parameters
+        self.scl = SuperviseContrastiveLoss()
+        self.ce = torch.nn.CrossEntropyLoss()
+
+        self.batch_size = batch_size
+        self.gama = gamma #0.1
+        self.max_iter = max_iter
+
+    def fit(self, X, y, X_unlabelled=None):
+        X = check_array(X, ensure_min_samples=2, accept_large_sparse=False,
+                        dtype=None)
+        self.n_samples_ = X.shape[0]
+        self.n_features_ = X.shape[1]
+
+        training_X, val_X, training_y, val_y = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        training_X_unlabeled, val_X_unlabeled = train_test_split(X_unlabelled, test_size=0.3, random_state=42)
+
+        # 2X batch size for mixup
+        self.batch_size_fit_ = 2*self.batch_size
+
+        if self.verbose == True:
+            pbar = tqdm()
+        self.loss_history_ = []
+
+        for _ in range(self.max_iter):
+            for b in range(training_X.shape[0]//self.batch_size_fit_):
+                batch_idxs = self.sample_batch_idxs(perturbed_training_X)
+                batch_idxs_original = batch_idxs % training_X.shape[0]
+                batch_X = training_X[batch_idxs_original]
+                batch_X_perturbed = perturbed_training_X[batch_idxs]
+                masks = training_masks[batch_idxs]
+                curr_loss = self.step(
+                    batch_X,batch_X_perturbed,masks)
+
+            self.model_.eval()
+            output_perturbed,output_masks = self.model_(perturbed_val_X)
+            feature_loss_value = self.feature_loss_(
+                output_perturbed,torch.cat([val_X for _ in range(self.n_pert_)])).sum()
+            mask_loss_value = self.mask_loss_(output_masks,val_masks).sum()
+            curr_loss_val = feature_loss_value + self.alpha * mask_loss_value
+            self.model_.train()
+
+            curr_loss_val = float(curr_loss_val.detach().cpu().numpy())
+            if self.verbose == True:
+                pbar.set_description("Validation loss = {:.4f}".format(
+                    curr_loss_val))
+                pbar.update()
+            if self.reduce_lr_on_plateau == True:
+                self.scheduler.step(curr_loss_val)
+            self.loss_history_.append(curr_loss_val)
+
+            N = np.minimum(self.n_iter_no_change,10)
+            if len(self.loss_history_) > N:
+                x = np.arange(0,N)
+                y = self.loss_history_[-N:]
+                lm = linregress(x,y)
+                if lm[2] > 0:
+                    self.change_accum_.append(1)
+                else:
+                    self.change_accum_.append(0)
+                if len(self.change_accum_) > self.n_iter_no_change:
+                    if np.mean(self.change_accum_) > 0.5:
+                        if self.verbose == True:
+                            print("\nEarly stopping criteria reached")
+                        break
+
+        self.n_features_in_ = self.n_features_
+        return self
+
