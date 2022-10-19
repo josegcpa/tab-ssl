@@ -12,11 +12,12 @@ from tqdm import tqdm
 
 from typing import Sequence,Union,List
 
-from .modules import SelfSLVIME,SemiSLVIME, SelfSLContrastive ,activation_factory, Predictor, AE, EmbeddingGenerator
+from .modules import SelfSLVIME,SemiSLVIME ,activation_factory, SelfSLAE
 from .losses import FeatureDecoderLoss, SuperviseContrastiveLoss
 from.data_generator import PerturbedDataGenerator, get_cat_info
 
 # TODO: tests for semi-supervised method
+
 
 class SKLearnSelfSLVIME(BaseEstimator):
     def __init__(self,
@@ -266,6 +267,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
             "optimizer_params": self.optimizer_params,
             "n_iter_no_change": self.n_iter_no_change,
             "verbose": self.verbose}
+
 
 class SKLearnSemiSLVIME(BaseEstimator):
     def __init__(self,
@@ -593,53 +595,30 @@ class SKLearnSemiSLVIME(BaseEstimator):
 class SKLearnSelfSLContrastive(BaseEstimator):
     def __init__(self,
                  hidden_dim: Sequence[int] = [128, ],
-                 act_fn: str = "relu",
-                 alpha: float = 2.0,
-                 batch_norm: bool = False,
                  batch_size: Union[int, str] = "auto",
                  validation_fraction: float = 0.1,
                  max_iter: int = 100,
-                 mask_p: float = 0.1,
-                 cat_thresh: float = 0.05,
                  random_state: int = 42,
                  learning_rate: float = 0.01,
                  reduce_lr_on_plateau: bool = True,
                  optimizer: str = "adam",
                  optimizer_params: tuple = tuple([]),
                  n_iter_no_change: int = 1e6,
-                 cat_cols: List[int] = None,
-                 embed: bool = False,
+                 embed: bool = True,
                  verbose: bool = False):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.act_fn = act_fn
-        self.alpha = alpha
-        self.batch_norm = batch_norm
         self.batch_size = batch_size
         self.validation_fraction = validation_fraction
         self.max_iter = max_iter
-        self.mask_p = mask_p
-        self.cat_thresh = cat_thresh
         self.random_state = random_state
         self.learning_rate = learning_rate
         self.reduce_lr_on_plateau = reduce_lr_on_plateau
         self.optimizer = optimizer
         self.optimizer_params = optimizer_params
         self.n_iter_no_change = n_iter_no_change
-        self.cat_cols = cat_cols
         self.embed = embed
         self.verbose = verbose
-
-    def get_adn_fn_(self):
-        if self.batch_norm == True:
-            def adn_fn(n):
-                return torch.nn.Sequential(
-                    activation_factory[self.act_fn](),
-                    torch.nn.BatchNorm1d(n))
-        else:
-            def adn_fn(n):
-                return activation_factory[self.act_fn]()
-        return adn_fn
 
     def fit(self, X, y=None):
         X = check_array(X, ensure_min_samples=2, accept_large_sparse=False,
@@ -663,14 +642,6 @@ class SKLearnSelfSLContrastive(BaseEstimator):
         val_X = X[val_idxs]
 
         cat_idxs, cat_dims = get_cat_info(X)
-        if self.embed:
-            embeddings = EmbeddingGenerator(X.shape[-1], cat_dims, cat_idxs)
-        else:
-            embeddings = EmbeddingGenerator(X.shape[-1], [], [])
-
-        post_embed_dim = embeddings.post_embed_dim
-
-        hidden_dim = [post_embed_dim] + self.hidden_dim
 
         training_X = torch.as_tensor(
             training_X, dtype=torch.float32)
@@ -678,25 +649,10 @@ class SKLearnSelfSLContrastive(BaseEstimator):
         val_X = torch.as_tensor(
             val_X, dtype=torch.float32)
 
+        self.model_ = SelfSLAE([768, ], training_X.shape[-1])
 
-        self.n_features_fit_ = self.pdg_.ad.n_col_out_
+        self.feature_loss_ = FeatureDecoderLoss(cat_idxs)
 
-        self.feature_loss_ = FeatureDecoderLoss(
-            self.pdg_.ad.cat_cols_out_)
-        self.mask_loss_ = F.binary_cross_entropy_with_logits
-
-        # TODO: fix encoder/decoder
-
-        # - encoder
-        self.encoder = torch.nn.ModuleList()
-        self.encoder.append(self.embeddings)
-        for i in range(1, len(hidden_dim)):
-            self.encoder.append(
-                torch.nn.Sequential(
-                    torch.nn.Linear(hidden_dim[i - 1], hidden_dim[i]),
-                    torch.nn.ReLU()
-                )
-            )
 
         self.init_optim()
 
@@ -704,22 +660,18 @@ class SKLearnSelfSLContrastive(BaseEstimator):
             pbar = tqdm()
         self.loss_history_ = []
         self.change_accum_ = []
+
         for _ in range(self.max_iter):
             for b in range(training_X.shape[0] // self.batch_size_fit_):
-                batch_idxs = self.sample_batch_idxs(perturbed_training_X)
-                batch_idxs_original = batch_idxs % training_X.shape[0]
-                batch_X = training_X[batch_idxs_original]
-                batch_X_perturbed = perturbed_training_X[batch_idxs]
-                masks = training_masks[batch_idxs]
-                curr_loss = self.step(
-                    batch_X, batch_X_perturbed, masks)
+                batch_idxs = self.sample_batch_idxs(training_X)
+                batch_X = training_X[batch_idxs]
+                curr_loss = self.step(batch_X)
 
             self.model_.eval()
-            output_perturbed, output_masks = self.model_(perturbed_val_X)
+            output = self.model_(val_X)
             feature_loss_value = self.feature_loss_(
-                output_perturbed, torch.cat([val_X for _ in range(self.n_pert_)])).sum()
-            mask_loss_value = self.mask_loss_(output_masks, val_masks).sum()
-            curr_loss_val = feature_loss_value + self.alpha * mask_loss_value
+                output, val_X).sum()
+            curr_loss_val = feature_loss_value
             self.model_.train()
 
             curr_loss_val = float(curr_loss_val.detach().cpu().numpy())
@@ -731,7 +683,7 @@ class SKLearnSelfSLContrastive(BaseEstimator):
                 self.scheduler.step(curr_loss_val)
             self.loss_history_.append(curr_loss_val)
 
-            N = np.minimum(self.n_iter_no_change, 10)
+            N = int(np.minimum(self.n_iter_no_change, 10))
             if len(self.loss_history_) > N:
                 x = np.arange(0, N)
                 y = self.loss_history_[-N:]
@@ -752,9 +704,8 @@ class SKLearnSelfSLContrastive(BaseEstimator):
     def transform(self, X, y=None):
         X = check_array(X, accept_large_sparse=False, dtype=None)
         self.model_.eval()
-        X = self.pdg_.ad.transform(X)
         X_tensor = torch.as_tensor(X, dtype=torch.float32)
-        pred = self.model_.encoder(X_tensor)
+        pred = self.model_.encode(X_tensor)
         self.model_.train()
         output = pred.detach().cpu().numpy()
         return output
@@ -763,13 +714,12 @@ class SKLearnSelfSLContrastive(BaseEstimator):
         self.fit(X)
         return self.transform(X)
 
-    def step(self, X, X_perturbed, masks):
+    def step(self, X):
         self.optimizer_fit_.zero_grad()
-        output_perturbed, output_masks = self.model_(X_perturbed)
-        feature_loss_value = self.feature_loss_(output_perturbed, X)
-        mask_loss_value = self.mask_loss_(output_masks, masks)
+        output = self.model_(X)
+        feature_loss_value = self.feature_loss_(output, X)
 
-        loss_value = feature_loss_value.sum() + self.alpha * mask_loss_value.sum()
+        loss_value = feature_loss_value.sum()
 
         loss_value.backward()
         self.optimizer_fit_.step()
@@ -817,16 +767,9 @@ class SKLearnSelfSLContrastive(BaseEstimator):
 
     def get_params(self, deep=None):
         return {
-            "encoder_structure": self.encoder_structure,
-            "decoder_structure": self.decoder_structure,
-            "mask_decoder_structure": self.mask_decoder_structure,
-            "act_fn": self.act_fn,
-            "batch_norm": self.batch_norm,
             "batch_size": self.batch_size,
             "validation_fraction": self.validation_fraction,
             "max_iter": self.max_iter,
-            "mask_p": self.mask_p,
-            "cat_thresh": self.cat_thresh,
             "random_state": self.random_state,
             "learning_rate": self.learning_rate,
             "optimizer": self.optimizer,
@@ -834,104 +777,4 @@ class SKLearnSelfSLContrastive(BaseEstimator):
             "optimizer_params": self.optimizer_params,
             "n_iter_no_change": self.n_iter_no_change,
             "verbose": self.verbose}
-
-class SKLearnContrastiveMixup(BaseEstimator):
-    def __init__(self,
-                 labeled_X: Sequence[float],
-                 unlabeled_X: Sequence[float],
-                 labels: Sequence[int],
-                 n_classes: int,
-                 n_input_features: int,
-                 encoder_structure: Sequence[int],
-                 decoder_structure: Sequence[int],
-                 batch_size: int,
-                 gamma: float,
-                 max_iter: int):
-        super().__init__()
-
-        # data
-        self.x = labeled_X
-        self.u_x = unlabeled_X
-        self.y = labels
-        self.p_y = None # pseudo labels
-
-        # autoencoder modules
-        self.n_input_features = n_input_features
-        self.encoder_structure = encoder_structure
-        self.decoder_structure = decoder_structure
-
-        self.AE =AE(self.n_input_features, self.encoder_structure, self.decoder_structure)
-
-        # Predictor MLP
-
-        self.Predictor = Predictor(self.n_input_features, [100,100], n_classes)
-
-        # Losses and associated parameters
-        self.scl = SuperviseContrastiveLoss()
-        self.ce = torch.nn.CrossEntropyLoss()
-
-        self.batch_size = batch_size
-        self.gama = gamma #0.1
-        self.max_iter = max_iter
-
-    def fit(self, X, y, X_unlabelled=None):
-        X = check_array(X, ensure_min_samples=2, accept_large_sparse=False,
-                        dtype=None)
-        self.n_samples_ = X.shape[0]
-        self.n_features_ = X.shape[1]
-
-        training_X, val_X, training_y, val_y = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-        training_X_unlabeled, val_X_unlabeled = train_test_split(X_unlabelled, test_size=0.3, random_state=42)
-
-        # 2X batch size for mixup
-        self.batch_size_fit_ = 2*self.batch_size
-
-        if self.verbose == True:
-            pbar = tqdm()
-        self.loss_history_ = []
-
-        for _ in range(self.max_iter):
-            for b in range(training_X.shape[0]//self.batch_size_fit_):
-                batch_idxs = self.sample_batch_idxs(perturbed_training_X)
-                batch_idxs_original = batch_idxs % training_X.shape[0]
-                batch_X = training_X[batch_idxs_original]
-                batch_X_perturbed = perturbed_training_X[batch_idxs]
-                masks = training_masks[batch_idxs]
-                curr_loss = self.step(
-                    batch_X,batch_X_perturbed,masks)
-
-            self.model_.eval()
-            output_perturbed,output_masks = self.model_(perturbed_val_X)
-            feature_loss_value = self.feature_loss_(
-                output_perturbed,torch.cat([val_X for _ in range(self.n_pert_)])).sum()
-            mask_loss_value = self.mask_loss_(output_masks,val_masks).sum()
-            curr_loss_val = feature_loss_value + self.alpha * mask_loss_value
-            self.model_.train()
-
-            curr_loss_val = float(curr_loss_val.detach().cpu().numpy())
-            if self.verbose == True:
-                pbar.set_description("Validation loss = {:.4f}".format(
-                    curr_loss_val))
-                pbar.update()
-            if self.reduce_lr_on_plateau == True:
-                self.scheduler.step(curr_loss_val)
-            self.loss_history_.append(curr_loss_val)
-
-            N = np.minimum(self.n_iter_no_change,10)
-            if len(self.loss_history_) > N:
-                x = np.arange(0,N)
-                y = self.loss_history_[-N:]
-                lm = linregress(x,y)
-                if lm[2] > 0:
-                    self.change_accum_.append(1)
-                else:
-                    self.change_accum_.append(0)
-                if len(self.change_accum_) > self.n_iter_no_change:
-                    if np.mean(self.change_accum_) > 0.5:
-                        if self.verbose == True:
-                            print("\nEarly stopping criteria reached")
-                        break
-
-        self.n_features_in_ = self.n_features_
-        return self
 

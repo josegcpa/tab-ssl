@@ -1,5 +1,6 @@
-from src.data import load_firewall
-from src.data_generator import EmbeddingGenerator, get_cat_info
+from ..data import load_firewall
+from ..data_generator import get_cat_info
+from ..modules import  EmbeddingGenerator
 
 X, y = load_firewall()
 
