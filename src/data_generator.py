@@ -2,6 +2,7 @@ import numpy as np
 import numpy.typing as npt
 from sklearn.preprocessing import OneHotEncoder,StandardScaler,MinMaxScaler
 from copy import deepcopy
+import torch
 
 from typing import List,Tuple,Union
 
@@ -194,3 +195,24 @@ class AutoDataset:
             for c_idx,o_idx in zip(range(cat_data.shape[1]),self.cat_cols_):
                 output[:,o_idx] = cat_data[:,c_idx]
         return output
+
+
+def get_cat_info(data):
+
+    cat_idxs = []
+    cat_dims = []
+
+    # get the first row
+    line = data[0]
+    # go through the elements to look for non int/floats
+    for idx in range(len(line)):
+        if isinstance(line[idx], str):
+            cat_idxs.append(idx)
+
+    # transpose to fo through the rows and get
+
+    data = data.T
+    for idx in cat_idxs:
+        cat_dims.append(len(np.unique(data[idx])))
+
+    return cat_idxs, cat_dims

@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import os
+from sklearn.model_selection import train_test_split
+
 
 def load_firewall(return_X_y=None):
     path = "data/firewall/log2.csv"
@@ -13,6 +15,7 @@ def load_firewall(return_X_y=None):
     X = np.array(X).astype(np.float32)
     y = np.array([class_match[l[class_col]] for l in lines]).astype(np.float32)
     return X,y
+
 
 def load_sensorless(return_X_y=None):
     path = "data/sensorless/Sensorless_drive_diagnosis.txt"
@@ -72,3 +75,22 @@ def load_data(name):
     X = df.drop(columns=['class'])
 
     return X.values, y.values
+
+
+def load_split_unlabeled(name, p_u):
+    """Function that returns both labeled and unlabeled data partitions from a fully labeled dataset.
+
+            Args:
+                name (str): name of the dataset.
+                p_u (float): percentage of the dataset that will be deemed unlabeled.
+
+            Returns:
+                [numpy.array]: numpy arrays for the labeled and unlabeled data.
+            """
+    print("> Opening: ", name + "\n", "> % unlabeled: ", str(p_u))
+
+    pd = path = os.path.join('data/open_ml', name)
+    df = pd.read_csv(path)
+
+    X_labeled, X_unlabeled, y, _ = train_test_split(df, random_state=42)
+    return (X_labeled, y), X_unlabeled
