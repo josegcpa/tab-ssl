@@ -18,7 +18,6 @@ from.data_generator import PerturbedDataGenerator, get_cat_info
 
 # TODO: tests for semi-supervised method
 
-
 class SKLearnSelfSLVIME(BaseEstimator):
     def __init__(self,
                  encoder_structure: Sequence[int],
@@ -60,7 +59,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
         self.n_iter_no_change = n_iter_no_change
         self.cat_cols = cat_cols
         self.verbose = verbose
-
+        
     def get_adn_fn_(self):
         if self.batch_norm == True:
             def adn_fn(n): 
@@ -92,7 +91,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
 
         training_X = X[train_idxs]
         val_X = X[val_idxs]
-        
+
         self.pdg_ = PerturbedDataGenerator(training_X,
                                            p=self.mask_p,
                                            cat_thresh=self.cat_thresh,
@@ -266,6 +265,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
             "reduce_lr_on_plateau": self.reduce_lr_on_plateau,
             "optimizer_params": self.optimizer_params,
             "n_iter_no_change": self.n_iter_no_change,
+            "cat_cols":self.cat_cols,
             "verbose": self.verbose}
 
 class SKLearnSemiSLVIME(BaseEstimator):
@@ -588,6 +588,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
             "reduce_lr_on_plateau": self.reduce_lr_on_plateau,
             "optimizer_params": self.optimizer_params,
             "n_iter_no_change": self.n_iter_no_change,
+            "cat_cols":self.cat_cols,
             "verbose": self.verbose}
 
 class SKLearnSelfSLContrastive(BaseEstimator):

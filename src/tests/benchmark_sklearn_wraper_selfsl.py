@@ -38,8 +38,8 @@ dataset_loaders_split = [
 
 random_state = 42
 n_folds = 5
-ss = 50
-ss = None
+ss = 1000
+#ss = None
 
 for dataset_loader in dataset_loaders:
     print(dataset_loader.__name__)
@@ -54,6 +54,7 @@ for dataset_loader in dataset_loaders:
         O = n_features
     else:
         O = n_features
+    
     vime = SKLearnSelfSLVIME(
         [*[n_features for _ in range(1)],O],
         [n_features for _ in range(1)],
