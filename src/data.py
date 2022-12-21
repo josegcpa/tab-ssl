@@ -15,7 +15,8 @@ open_ml_datasets = {
         50, 51, 52, 53],
                  "class_col":0},
     "credit":{"cat_cols":[],"class_col":0},
-    "electricity":{"cat_cols":[2],"class_col":0},
+    "electricity":{"cat_cols":[2],
+                   "class_col":0},
     "eye_movements":{"cat_cols":[3,4,17,22,23],
                      "class_col":0},
     "Higgs":{"cat_cols":[],"class_col":0},
@@ -79,11 +80,12 @@ def load_firewall():
     class_match = {"allow":0,"deny":1,"drop":2,"reset-both":3}
     class_col = 4
     cols_to_exclude = [0,1,2,3]
+    cat_cols = []
     X,y = load_data(path,class_match,class_col,cols_to_exclude,1)
-    return X,y
+    return X,y,cat_cols
 
 def load_sensorless():
-    path = "data/sensorless/Sensorless_drive_diagnosis.txt"
+    path = "data/sensorless/Sensorless_drive_diagnosis.csv"
     class_match = {str(i+1):i for i in range(11)}
     class_col = 48
     cols_to_exclude = []
@@ -112,16 +114,16 @@ def load_sepsis(split="train"):
     class_col = 3
     cols_to_exclude = []
     cat_cols = [1]
-    X,y = load_data(path,class_match,class_col,cols_to_exclude)
+    X,y = load_data(path,class_match,class_col,cols_to_exclude,1)
     return X,y,cat_cols
     
 def load_data_open_ml(name):
     path = os.path.join('data/open_ml/{}.csv'.format(name))
-    class_match = {0:0,1:1}
+    class_match = {"0":0,"1":1}
     class_col = open_ml_datasets[name]["class_col"]
     cols_to_exclude = []
     cat_cols = open_ml_datasets[name]["cat_cols"]
-    X,y = load_data(path,class_match,class_col,cols_to_exclude,first_line_idx=0)
+    X,y = load_data(path,class_match,class_col,cols_to_exclude,1)
     return X,y,cat_cols
 
 def load_split_unlabeled(name, p_u):

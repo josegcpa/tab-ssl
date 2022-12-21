@@ -39,14 +39,16 @@ dataset_loaders_split = [
 random_state = 42
 n_folds = 5
 ss = 50
-#ss = None
+ss = None
 
 for dataset_loader in dataset_loaders:
+    print(dataset_loader.__name__)
     X,y,cat_cols = dataset_loader()
     if ss is not None:
         rs = np.random.choice(X.shape[0],np.minimum(ss,X.shape[0]))
         X,y = X[rs],y[rs]
     n_samples,n_features = X.shape
+    print("n_samples={}; n_features={}".format(n_samples,n_features))
 
     if n_features // 2 < 5:
         O = n_features
@@ -66,7 +68,7 @@ for dataset_loader in dataset_loaders:
         optimizer_params=[("weight_decay",0.005)],
         act_fn="swish",
         batch_norm=True,
-        verbose=False,
+        verbose=True,
         cat_cols=cat_cols)
     
     standard_rf = Pipeline([
@@ -76,7 +78,6 @@ for dataset_loader in dataset_loaders:
         ("preprocessing",vime),
         ("estimator",RandomForestClassifier(random_state=random_state))])
 
-    print(dataset_loader.__name__,n_samples,n_features)
     if len(np.unique(y)) > 2:
         metric = "f1_macro"
     else:
