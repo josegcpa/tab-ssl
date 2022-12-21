@@ -7,25 +7,29 @@ from sklearn import datasets
 open_ml_datasets = {
     "bank-marketing":{"cat_cols":[],"class_col":0},
     "california":{"cat_cols":[],"class_col":0},
-    "compass":{"cat_cols":[1,3,4,11,12,13,14,15,16],"class_col":0},
+    "compass":{"cat_cols":[0, 2, 3, 10,11, 12, 13, 14, 15],
+               "class_col":0},
     "covertype":{"cat_cols":[
-        15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,
-        32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,
-        49,50,51,52,53,54],"class_col":0},
+        14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+        50, 51, 52, 53],
+                 "class_col":0},
     "credit":{"cat_cols":[],"class_col":0},
     "electricity":{"cat_cols":[2],"class_col":0},
-    "eye_movements":{"cat_cols":[3,4,17,22,23],"class_col":0},
+    "eye_movements":{"cat_cols":[3,4,17,22,23],
+                     "class_col":0},
     "Higgs":{"cat_cols":[],"class_col":0},
     "house_16H":{"cat_cols":[],"class_col":0},
     "jannis":{"cat_cols":[],"class_col":0},
     "KDDCup09_upselling":{"cat_cols":[
-        35,36,37,38,39,40,41,42,43,44,45,46,47,48,49],"class_col":0},
+        34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48],
+                          "class_col":0},
     "kdd_ipums_la_97-small":{"cat_cols":[],"class_col":0},
     "MagicTelescope":{"cat_cols":[],"class_col":0},
     "MiniBooNE":{"cat_cols":[],"class_col":0},
     "phoneme":{"cat_cols":[],"class_col":0},
-    "rl":{"cat_cols":[4,5,6,7,8,9,12],"class_col":0},
-    "road-safety":{"cat_cols":[7,23,26],"class_col":0},
+    "rl":{"cat_cols":[3, 4, 5, 6, 7, 8, 11],"class_col":0},
+    "road-safety":{"cat_cols":[6, 22, 25],"class_col":0},
 }
 
 def load_iris():
