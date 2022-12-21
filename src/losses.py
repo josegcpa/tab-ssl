@@ -23,7 +23,6 @@ class FeatureDecoderLoss(torch.nn.Module):
             loss = F.mse_loss(pred,target)
         return loss
 
-
 class SuperviseContrastiveLoss(torch.nn.Module):
     """Supervised Contrastive Learning: https://arxiv.org/pdf/2004.11362.pdf.
     It also supports the unsupervised contrastive loss in SimCLR"""

@@ -198,7 +198,6 @@ class AutoDataset:
 
 
 def get_cat_info(data):
-
     cat_idxs = []
     cat_dims = []
 
@@ -210,7 +209,6 @@ def get_cat_info(data):
             cat_idxs.append(idx)
 
     # transpose to fo through the rows and get
-
     data = data.T
     for idx in cat_idxs:
         cat_dims.append(len(np.unique(data[idx])))

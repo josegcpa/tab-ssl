@@ -268,7 +268,6 @@ class SKLearnSelfSLVIME(BaseEstimator):
             "n_iter_no_change": self.n_iter_no_change,
             "verbose": self.verbose}
 
-
 class SKLearnSemiSLVIME(BaseEstimator):
     def __init__(self,
                  vime_self_sl: BaseEstimator,
@@ -590,7 +589,6 @@ class SKLearnSemiSLVIME(BaseEstimator):
             "optimizer_params": self.optimizer_params,
             "n_iter_no_change": self.n_iter_no_change,
             "verbose": self.verbose}
-
 
 class SKLearnSelfSLContrastive(BaseEstimator):
     def __init__(self,

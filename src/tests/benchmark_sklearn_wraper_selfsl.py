@@ -6,15 +6,20 @@ from sklearn.metrics import classification_report
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_validate,StratifiedKFold
 from sklearn.utils.estimator_checks import check_estimator
-from sklearn.datasets import (
-    load_iris,load_diabetes,load_digits,load_linnerud,load_wine,
-    load_breast_cancer)
 
 from typing import List
 
 from ..data_generator import AutoDataset
 from ..sklearn_wrappers import SKLearnSelfSLVIME
-from ..data import (load_sepsis, load_scania, load_firewall, load_sensorless)
+from ..data import (
+    load_iris,
+    load_digits,
+    load_wine,
+    load_breast_cancer,
+    load_sepsis,
+    load_scania,
+    load_firewall,
+    load_sensorless)
 
 dataset_loaders = [
     load_iris,
@@ -33,24 +38,15 @@ dataset_loaders_split = [
 
 random_state = 42
 n_folds = 5
-ss = 1000
-ss = None
+ss = 50
+#ss = None
 
 for dataset_loader in dataset_loaders:
-    X,y = dataset_loader(return_X_y=True)
+    X,y,cat_cols = dataset_loader()
     if ss is not None:
         rs = np.random.choice(X.shape[0],np.minimum(ss,X.shape[0]))
         X,y = X[rs],y[rs]
     n_samples,n_features = X.shape
-
-    if dataset_loader.__name__ in ["fetch_california_housing","load_sensorless"]:
-        ct = 10
-    elif dataset_loader.__name__ in ["load_digits","load_scania"]:
-        ct = 0
-    elif dataset_loader.__name__ in ["load_firewall"]:
-        ct = 4
-    else:
-        ct = 0.1
 
     if n_features // 2 < 5:
         O = n_features
@@ -68,13 +64,13 @@ for dataset_loader in dataset_loaders:
         batch_size=n_samples//5,
         optimizer="rmsprop",
         optimizer_params=[("weight_decay",0.005)],
-        act_fn="relu",
+        act_fn="swish",
         batch_norm=True,
-        verbose=True,
-        cat_thresh=ct)
+        verbose=False,
+        cat_cols=cat_cols)
     
     standard_rf = Pipeline([
-        ("preprocessing",AutoDataset(cat_thresh=ct)),
+        ("preprocessing",AutoDataset(cat_cols=cat_cols)),
         ("estimator",RandomForestClassifier(random_state=random_state))])
     vime_rf = Pipeline([
         ("preprocessing",vime),

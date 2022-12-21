@@ -30,7 +30,6 @@ activation_factory = {
     "logsoftmax": torch.nn.LogSoftmax,
     "swish": torch.nn.SiLU}
 
-
 class MLP(torch.nn.Module):
     def __init__(self,
                  n_input_features:int,
@@ -73,7 +72,6 @@ class MLP(torch.nn.Module):
             "MLP with parameters:",*param_str])
         return rep
 
-
 class SelfSLVIME(torch.nn.Module):
     def __init__(self,
                  n_input_features: int,
@@ -112,7 +110,6 @@ class SelfSLVIME(torch.nn.Module):
         mask_dec_out = self.mask_decoder(enc_out)
         return dec_out,mask_dec_out
 
-
 class SemiSLVIME(torch.nn.Module):
     def __init__(self,
                  n_input_features: int,
@@ -138,7 +135,6 @@ class SemiSLVIME(torch.nn.Module):
         with torch.no_grad():
             enc_out = self.encoder.encoder(X)
         return self.predictor(enc_out)
-
 
 class Predictor(torch.nn.Module):
     def __init__(self,
@@ -175,7 +171,6 @@ class Predictor(torch.nn.Module):
 
     def forward(self, x):
         return self.op(x)
-
 
 class EmbeddingGenerator(torch.nn.Module):
     """
@@ -257,7 +252,6 @@ class EmbeddingGenerator(torch.nn.Module):
         post_embeddings = torch.cat(cols, dim=1)
         return post_embeddings
 
-
 class SelfSLAE(torch.nn.Module):
     # Autoencoder for the self supervised contrastive mixup
     def __init__(self,
@@ -311,15 +305,12 @@ class SelfSLAE(torch.nn.Module):
 
         return x
 
-
     def forward(self, x):
         enc = self.encode(x)
         dec = self.decode(enc)
 
         return dec
 
-
 def weight_init(m):
     if isinstance(m, torch.nn.Linear):
         torch.nn.init.kaiming_uniform_(m.weight)
-

@@ -14,9 +14,9 @@ openml.config.apikey = open_ml_api_key  # set the OpenML Api Key
 # as shown in https://hal.archives-ouvertes.fr/hal-03723551
 
 SUITE_IDS = [
-    297, # Regression on numerical features
+    #297, # Regression on numerical features
     298, # Classification on numerical features
-    299, # Regression on numerical and categorical features
+    #299, # Regression on numerical and categorical features
     304 # Classification on numerical and categorical features
 ]
 for SUITE_ID in SUITE_IDS:
@@ -28,4 +28,4 @@ for SUITE_ID in SUITE_IDS:
             dataset_format="dataframe", target=dataset.default_target_attribute
         )
         X.insert(loc=0, column='class', value=y)
-        X.to_csv("../data/open_ml/{}.csv".format(dataset.name),index=False)
+        X.to_csv("data/open_ml/{}.csv".format(dataset.name),index=False)
