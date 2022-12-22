@@ -94,7 +94,10 @@ if __name__ == "__main__":
         # export only what is strictly necessary 
         # to compute downstream metrics
         pred = pipeline.predict(val_X).tolist()
-        pred_proba = pipeline.predict_proba(val_X).tolist()
+        try:
+            pred_proba = pipeline.predict_proba(val_X).tolist()
+        except:
+            pred_proba = None
         output_dict = {
             "pred":pred,
             "pred_proba":pred_proba,
