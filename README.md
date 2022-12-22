@@ -18,3 +18,13 @@ In `src/tests/` a number of tests have been implemented. Here, files starting wi
 The data for the tests in `src/tests/benchmark_sklearn_wraper_selfsl.py` (in `data`) are either native to `sklearn` or are available in the [UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/index.php) ([`scania`](https://archive.ics.uci.edu/ml/datasets/APS+Failure+at+Scania+Trucks), [`firewall`](https://archive.ics.uci.edu/ml/datasets/Internet+Firewall+Data), [`sensorless`](https://archive.ics.uci.edu/ml/datasets/dataset+for+sensorless+drive+diagnosis) and [`sepsis`](https://archive.ics.uci.edu/ml/datasets/Sepsis+survival+minimal+clinical+records)). 
 
 The `utils/download_open_ml_data.py` script, adapted from "[Why do tree-based models still outperform deep learning on tabular data?](https://hal.archives-ouvertes.fr/hal-03723551)", can be used to download a set of benchmarking datasets from OpenML. To run it, run the following command: `python utils/download_open_ml_data.py OPEN_ML_API_KEY`, where `OPEN_ML_API_KEY` is your OpenML API key.
+
+# Command-line tool
+
+We have packaged a CLI which can be run as `python -m src`. The details regarding this can be accessed by running `python -m src --help`. In short, using this one can run a machine-learning experiment using:
+
+1. A given dataset (`iris`, `digits`, `wine`, `breast_cancer`, `firewall`, `sensorless`, `scania`, `sepsis`, `bank-marketing`, `california`, `compass`, `covertype`, `credit`, `electricity`, `eye_movements`, `Higgs`, `house_16H`, `jannis`, `KDDCup09_upselling`, `kdd_ipums_la_97-small`, `MagicTelescope`, `MiniBooNE`, `phoneme`, `rl`, `road-safety`)
+2. A given decomposition algorithm (`pca`, `fa`, `fastica`, `ipca`, `ae` and `vime`) 
+3. A given learning algorithm (`rf` and `linear`)
+
+Parameters for the decomposition algorithms and learning algorithms can be specified using YAML files (with s`--decomposition_config` and `--learning_algorithm_config`). To add datasets to this CLI, one only has to create a loader function in `src/data.py` and add it to the `supported_datasets` dictionary in the same file. Loader functions should return 1

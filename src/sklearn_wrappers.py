@@ -1,28 +1,247 @@
-from configparser import MAX_INTERPOLATION_DEPTH
 import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.stats import linregress
 from sklearn.utils import check_array, check_random_state
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator
 from sklearn.utils.class_weight import compute_class_weight
-from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
 from typing import Sequence,Union,List
 
-from .modules import SelfSLVIME,SemiSLVIME ,activation_factory, SelfSLAE
+from .modules import (
+    SelfSLVIME,
+    SemiSLVIME,
+    activation_factory,
+    SelfSLAE, 
+    AutoEncoder)
 from .losses import FeatureDecoderLoss, SuperviseContrastiveLoss
 from.data_generator import PerturbedDataGenerator, get_cat_info
 
 # TODO: tests for semi-supervised method
 
+class SKLearnAutoEncoder(BaseEstimator):
+    def __init__(self,
+                 structure: Sequence[int]=None,
+                 code_size: int=None,
+                 act_fn: str="relu",
+                 batch_norm: bool=False,
+                 batch_size: Union[int,str]="auto",
+                 validation_fraction: float=0.1,
+                 max_iter: int=100,
+                 random_state: int=42,
+                 learning_rate: float=0.01,
+                 reduce_lr_on_plateau: bool=True,
+                 optimizer: str="adam",
+                 optimizer_params: tuple=tuple([]),
+                 n_iter_no_change: int=1e6,
+                 cat_cols: List[int]=[],
+                 verbose: bool=False):
+        super().__init__()
+        self.structure = structure
+        self.code_size = code_size
+        self.act_fn = act_fn
+        self.batch_norm = batch_norm
+        self.batch_size = batch_size
+        self.validation_fraction = validation_fraction
+        self.max_iter = max_iter
+        self.random_state = random_state
+        self.learning_rate = learning_rate
+        self.reduce_lr_on_plateau = reduce_lr_on_plateau
+        self.optimizer = optimizer
+        self.optimizer_params = optimizer_params
+        self.n_iter_no_change = n_iter_no_change
+        self.cat_cols = cat_cols
+        self.verbose = verbose
+        
+    def get_adn_fn_(self):
+        if self.batch_norm == True:
+            def adn_fn(n): 
+                return torch.nn.Sequential(
+                    activation_factory[self.act_fn](),
+                    torch.nn.BatchNorm1d(n))
+        else:
+            def adn_fn(n): 
+                return activation_factory[self.act_fn]()
+        return adn_fn
+
+    def fit(self,X,y=None):
+        X = check_array(X,ensure_min_samples=2,accept_large_sparse=False,
+                        dtype=None)
+        self.n_samples_ = X.shape[0]
+        self.n_features_ = X.shape[1]
+        self.n_pert_ = 5
+
+        if self.batch_size == "auto":
+            self.batch_size_fit_ = np.minimum(200,self.n_samples_)
+        else:
+            self.batch_size_fit_ = self.batch_size
+
+        val_idxs = self.sample_batch_idxs(
+            X,int(self.n_samples_*self.validation_fraction))
+        train_idxs = [
+            i for i in range(self.n_samples_)
+            if i not in val_idxs]
+
+        training_X = X[train_idxs]
+        val_X = X[val_idxs]
+
+        training_X = torch.as_tensor(
+            training_X,dtype=torch.float32)
+        val_X = torch.as_tensor(
+            val_X,dtype=torch.float32)
+
+        self.reconstruction_loss_ = FeatureDecoderLoss(self.cat_cols)
+
+        self.adn_fn_ = self.get_adn_fn_()
+
+        if self.structure is None:
+            self.structure_ = [self.n_features_ for _ in range(2)]
+        else:
+            self.structure_ = self.structure
+
+        if self.code_size is None:
+            if self.n_features_ > 8:
+                self.code_size_ = self.n_features_ // 2
+            else:
+                self.code_size_ = self.n_features_
+
+        self.model_ = AutoEncoder(
+            self.n_features_,
+            self.structure_,
+            self.code_size_,
+            self.adn_fn_)
+        
+        self.init_optim()
+
+        if self.verbose == True:
+            pbar = tqdm()
+        self.loss_history_ = []
+        self.change_accum_ = []
+        for _ in range(self.max_iter):
+            for b in range(training_X.shape[0]//self.batch_size_fit_):
+                batch_idxs = self.sample_batch_idxs(training_X)
+                batch_X = training_X[batch_idxs]
+                curr_loss = self.step(batch_X)
+
+            self.model_.eval()
+            val_output = self.model_(val_X)
+            curr_loss_val = self.reconstruction_loss_(val_output,val_X).sum()
+            self.model_.train()
+
+            curr_loss_val = float(curr_loss_val.detach().cpu().numpy())
+            if self.verbose == True:
+                pbar.set_description("Validation loss = {:.4f}".format(
+                    curr_loss_val))
+                pbar.update()
+            if self.reduce_lr_on_plateau == True:
+                self.scheduler.step(curr_loss_val)
+            self.loss_history_.append(curr_loss_val)
+
+            N = int(np.minimum(self.n_iter_no_change,10))
+            if len(self.loss_history_) > N:
+                x = np.arange(0,N)
+                y = self.loss_history_[-N:]
+                lm = linregress(x,y)
+                if lm[2] > 0:
+                    self.change_accum_.append(1)
+                else:
+                    self.change_accum_.append(0)
+                if len(self.change_accum_) > self.n_iter_no_change:
+                    if np.mean(self.change_accum_) > 0.5:
+                        if self.verbose == True:
+                            print("\nEarly stopping criteria reached")
+                        break
+
+        self.n_features_in_ = self.n_features_
+        return self
+    
+    def transform(self,X,y=None):
+        X = check_array(X,accept_large_sparse=False,dtype=None)
+        self.model_.eval()
+        X_tensor = torch.as_tensor(X,dtype=torch.float32)
+        pred = self.model_.encode(X_tensor)
+        self.model_.train()
+        output = pred.detach().cpu().numpy()
+        return output
+
+    def fit_transform(self,X,y=None):
+        self.fit(X)
+        return self.transform(X)
+
+    def step(self,X):
+        self.optimizer_fit_.zero_grad()
+        output = self.model_(X)
+        loss_value = self.reconstruction_loss_(output,X).sum()
+
+        loss_value.backward()
+        self.optimizer_fit_.step()
+        
+        loss_value_np = loss_value.detach().cpu().numpy()
+        
+        return loss_value_np
+
+    def sample_batch_idxs(self,X,batch_size=None):
+        if batch_size is None:
+            batch_size = self.batch_size_fit_
+        random_state = check_random_state(self.random_state)
+        i = random_state.randint(X.shape[0],size=batch_size)
+        return i
+    
+    def init_optim(self):
+        self.optimizer_dict_ = {
+            "adam":torch.optim.Adam,
+            "sgd":torch.optim.SGD,
+            "adamw":torch.optim.AdamW,
+            "rmsprop":torch.optim.RMSprop
+        }
+        if self.optimizer in self.optimizer_dict_:
+            self.optimizer_ = self.optimizer_dict_[self.optimizer]
+        else:
+            raise "Only {} are valid optimizers".format(self.optimizer_dict_.keys())
+        self.optimizer_params_ = dict(self.optimizer_params)
+        self.optimizer_fit_ = self.optimizer_(
+            self.model_.parameters(),self.learning_rate,
+            **self.optimizer_params_)
+        if self.reduce_lr_on_plateau == True:
+            self.scheduler = ReduceLROnPlateau(
+                self.optimizer_fit_,'min',patience=self.n_iter_no_change,
+                verbose=self.verbose,min_lr=self.learning_rate/1000)
+
+    def set_params(self,**param_dict):
+        original_param_dict = self.get_params()
+        for k in param_dict:
+            if k in original_param_dict:
+                original_param_dict[k] = param_dict[k]
+            else:
+                raise Exception("{} not a valid parameter key".format(k))
+        self.__init__(**original_param_dict)
+        return self
+
+    def get_params(self,deep=None):
+        return {
+            "structure": self.structure,
+            "code_size": self.code_size,
+            "act_fn": self.act_fn,
+            "batch_norm": self.batch_norm,
+            "batch_size": self.batch_size,
+            "validation_fraction": self.validation_fraction,
+            "max_iter": self.max_iter,
+            "random_state": self.random_state,
+            "learning_rate": self.learning_rate,
+            "optimizer": self.optimizer,
+            "reduce_lr_on_plateau": self.reduce_lr_on_plateau,
+            "optimizer_params": self.optimizer_params,
+            "n_iter_no_change": self.n_iter_no_change,
+            "cat_cols":self.cat_cols,
+            "verbose": self.verbose}
+
 class SKLearnSelfSLVIME(BaseEstimator):
     def __init__(self,
-                 encoder_structure: Sequence[int],
-                 decoder_structure: Sequence[int],
-                 mask_decoder_structure: Sequence[int],
+                 encoder_structure: Sequence[int]=None,
+                 decoder_structure: Sequence[int]=None,
+                 mask_decoder_structure: Sequence[int]=None,
                  act_fn: str="relu",
                  alpha: float=2.0,
                  batch_norm: bool=False,
@@ -123,10 +342,23 @@ class SKLearnSelfSLVIME(BaseEstimator):
 
         self.adn_fn_ = self.get_adn_fn_()
 
+        if self.encoder_structure is None:
+            self.encoder_structure_ = [self.n_features_ for _ in range(2)]
+        else:
+            self.encoder_structure_ = self.decoder_structure
+        if self.decoder_structure is None:
+            self.decoder_structure_ = [self.n_features_ for _ in range(2)]
+        else:
+            self.decoder_structure_ = self.decoder_structure
+        if self.mask_decoder_structure is None:
+            self.mask_decoder_structure_ = [self.n_features_ for _ in range(2)]
+        else:
+            self.mask_decoder_structure_ = self.mask_decoder_structure
+
         self.model_ = SelfSLVIME(
             self.n_features_fit_,
-            self.encoder_structure,
-            self.decoder_structure,
+            self.encoder_structure_,
+            self.decoder_structure_,
             self.mask_decoder_structure,
             self.adn_fn_)
         
@@ -163,7 +395,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
                 self.scheduler.step(curr_loss_val)
             self.loss_history_.append(curr_loss_val)
 
-            N = np.minimum(self.n_iter_no_change,10)
+            N = int(np.minimum(self.n_iter_no_change,10))
             if len(self.loss_history_) > N:
                 x = np.arange(0,N)
                 y = self.loss_history_[-N:]
@@ -776,4 +1008,3 @@ class SKLearnSelfSLContrastive(BaseEstimator):
             "optimizer_params": self.optimizer_params,
             "n_iter_no_change": self.n_iter_no_change,
             "verbose": self.verbose}
-

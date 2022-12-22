@@ -252,6 +252,43 @@ class EmbeddingGenerator(torch.nn.Module):
         post_embeddings = torch.cat(cols, dim=1)
         return post_embeddings
 
+class AutoEncoder(torch.nn.Module):
+    """Standard autoencoder for tabular data.
+    """
+    def __init__(self,
+                 in_channels:int,
+                 structure:Sequence[int],
+                 code_size:int,
+                 adn_fn:Callable=torch.nn.Identity):
+        super().__init__()
+        self.in_channels = in_channels
+        self.structure = structure
+        self.code_size = code_size
+        self.adn_fn = adn_fn
+
+        self.encoder = self.init_structure(
+            self.structure + [self.code_size])
+        self.decoder = self.init_structure(
+            [self.code_size] + self.structure[::-1])
+
+    def init_structure(self,structure):
+        curr = self.in_channels
+        output = torch.nn.ModuleList([])
+        for s in structure:
+            output.append(torch.nn.Linear(curr,s))
+            output.append(self.adn_fn(s))
+            curr = s
+        return torch.nn.Sequential(*output)
+    
+    def encode(self,X):
+        return self.encoder(X)
+
+    def decode(self,X):
+        return self.decoder(X)
+    
+    def forward(self,X):
+        return self.decode(self.encode(X))
+
 class SelfSLAE(torch.nn.Module):
     # Autoencoder for the self supervised contrastive mixup
     def __init__(self,
