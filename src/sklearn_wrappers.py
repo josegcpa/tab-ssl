@@ -21,6 +21,10 @@ from.data_generator import PerturbedDataGenerator, get_cat_info
 
 # TODO: tests for semi-supervised method
 
+def seed_everything(random_state):
+    torch.manual_seed(random_state)
+    np.random.seed(random_state)
+
 class SKLearnAutoEncoder(BaseEstimator):
     def __init__(self,
                  structure: Sequence[int]=None,
@@ -67,6 +71,7 @@ class SKLearnAutoEncoder(BaseEstimator):
         return adn_fn
 
     def fit(self,X,y=None):
+        seed_everything(self.random_state)
         X = check_array(X,ensure_min_samples=2,accept_large_sparse=False,
                         dtype=None)
         self.n_samples_ = X.shape[0]
@@ -291,6 +296,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
         return adn_fn
 
     def fit(self,X,y=None):
+        seed_everything(self.random_state)
         X = check_array(X,ensure_min_samples=2,accept_large_sparse=False,
                         dtype=None)
         self.n_samples_ = X.shape[0]
@@ -552,6 +558,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
         return adn_fn
 
     def fit(self,X,y,X_unlabelled=None):
+        seed_everything(self.random_state)
         X = check_array(
             X,ensure_min_samples=2,accept_large_sparse=False,
             dtype=None)
@@ -852,6 +859,7 @@ class SKLearnSelfSLContrastive(BaseEstimator):
         self.verbose = verbose
 
     def fit(self, X, y=None):
+        seed_everything(self.random_state)
         X = check_array(X, ensure_min_samples=2, accept_large_sparse=False,
                         dtype=None)
         self.n_samples_ = X.shape[0]
