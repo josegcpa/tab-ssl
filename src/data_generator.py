@@ -325,7 +325,7 @@ class PerturbedDataGenerator:
             sub_X,idxs = self.retrieve_n_entries(
                 X,y,n,self.ad,idxs,self.generator)
             sub_X_perturbed,masks = self.retrieve_perturbed_entries(
-                X,idxs,n_p,self.p,self.ad,self.generator)
+                X,idxs=idxs,n=n_p,p=self.p,ad=self.ad,generator=self.generator)
             return (sub_X,
                     sub_X_perturbed,
                     masks)
@@ -333,7 +333,7 @@ class PerturbedDataGenerator:
             sub_X,sub_y,idxs = self.retrieve_n_entries(
                 X,y,n,self.ad,self.generator)
             sub_X_perturbed,masks = self.retrieve_perturbed_entries(
-                X,idxs,n_p,self.p,self.ad,self.generator)
+                X,idxs=idxs,n=n_p,p=self.p,ad=self.ad,generator=self.generator)
             return (sub_X,
                     sub_y,
                     sub_X_perturbed,
