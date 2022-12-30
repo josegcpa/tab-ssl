@@ -47,8 +47,18 @@ if __name__ == "__main__":
                         help="Path to yaml file with learning algorithm args")
     parser.add_argument("--n_workers",default=0,type=int,
                         help="Number of concurrent processes")
+    parser.add_argument("--output_file",default=None,
+                        help="Path for output json file. If not specified \
+                            prints json.")
 
     args,unknown_args = parser.parse_known_args()
+    
+    dataset = supported_datasets[
+        args.dataset]
+    learning_algorithm = supported_learning_algorithms[
+        args.learning_algorithm]
+
+    X,y,cat_cols = dataset()
     
     if args.decomposition_config is not None:
         decomposition_config = yaml.load(args.decomposition_config)
@@ -56,18 +66,13 @@ if __name__ == "__main__":
         decomposition_config = {}
     if args.decomposition != "ipca":
         decomposition_config["random_state"] = args.seed
+    if args.decomposition in ["ae","vime"]:
+        decomposition_config["cat_cols"] = cat_cols
     
     if args.learning_algorithm_config is not None:
         learning_algorithm_config = yaml.load(args.learning_algorithm_config)
     else:
         learning_algorithm_config = {}
-        
-    dataset = supported_datasets[
-        args.dataset]
-    learning_algorithm = supported_learning_algorithms[
-        args.learning_algorithm]
-
-    X,y,cat_cols = dataset()
 
     preproc_transforms = [
         ("auto_dataset",AutoDataset(cat_cols=cat_cols)),
@@ -97,9 +102,14 @@ if __name__ == "__main__":
         time_a = time.time()
         if args.unsupervised_fraction is not None:
             train_X,train_X_unsupervised,train_y,_ = train_test_split(
-                train_X,train_y,test_size=args.unsupervised_fraction)
+                train_X,train_y,test_size=args.unsupervised_fraction,
+                stratify=train_y,random_state=args.seed)
+            print("Unsupervised learning array shape:",
+                  train_X_unsupervised.shape)
         else:
             train_X_unsupervised = train_X
+        print("Supervised learning array shape:",
+              train_X.shape)
         pipeline_preprocessing.fit(train_X_unsupervised)
         learner.fit(pipeline_preprocessing.transform(train_X),train_y)
         time_b = time.time()
@@ -115,12 +125,14 @@ if __name__ == "__main__":
         except:
             pred_proba = None
         nc = len(np.unique(val_y))
+        f1 = f1_score(val_y,pred,average="binary" if nc==2 else "micro")
+        print("Fold concluded\n\tF1-score={}".format(f1))
         output_dict = {
             "pred":pred,
             "pred_proba":pred_proba,
             "y":val_y.tolist(),
             "n_classes":nc,
-            "f1-score":f1_score(val_y,pred,average="binary" if nc==2 else "micro"),
+            "f1-score":f1,
             "time_elapsed":elapsed
         }
         return output_dict
@@ -134,5 +146,10 @@ if __name__ == "__main__":
     else:
         pool = Pool(args.n_workers)
         fold_scoring = pool.map(wraper,splits)
-    
-    print(json.dumps(fold_scoring,indent=2))
+        
+    out = json.dumps(fold_scoring,indent=2)
+    if args.output_file is not None:
+        with open(args.output_file,"w") as o:
+            o.write(out)
+    else:
+        print(out)
