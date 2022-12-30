@@ -39,7 +39,7 @@ class SKLearnAutoEncoder(BaseEstimator):
                  reduce_lr_on_plateau: bool=True,
                  optimizer: str="rmsprop",
                  optimizer_params: tuple=tuple([]),
-                 n_iter_no_change: int=10,
+                 n_iter_no_change: int=20,
                  cat_cols: List[int]=[],
                  verbose: bool=False):
         super().__init__()
@@ -260,7 +260,7 @@ class SKLearnSelfSLVIME(BaseEstimator):
                  reduce_lr_on_plateau: bool=True,
                  optimizer: str="rmsprop",
                  optimizer_params: tuple=tuple([]),
-                 n_iter_no_change: int=10,
+                 n_iter_no_change: int=20,
                  cat_cols: List[int]=None,
                  verbose: bool=False):
         super().__init__()
@@ -522,7 +522,7 @@ class SKLearnSemiSLVIME(BaseEstimator):
                  reduce_lr_on_plateau: bool=True,
                  optimizer: str="rmsprop",
                  optimizer_params: tuple=tuple([]),
-                 n_iter_no_change: int=10,
+                 n_iter_no_change: int=20,
                  cat_cols: List[int]=None,
                  class_weight: Union[str,Sequence[float]]=None,
                  verbose: bool=False):
