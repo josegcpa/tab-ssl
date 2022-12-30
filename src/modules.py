@@ -8,6 +8,7 @@ from .losses import SuperviseContrastiveLoss
 activation_factory = {
     "identity": torch.nn.Identity,
     "elu": torch.nn.ELU,
+    "gelu": torch.nn.GELU,
     "hard_shrink": torch.nn.Hardshrink,
     "hard_tanh": torch.nn.Hardtanh,
     "leaky_relu": torch.nn.LeakyReLU,
