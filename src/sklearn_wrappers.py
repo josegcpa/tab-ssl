@@ -29,7 +29,7 @@ class SKLearnAutoEncoder(BaseEstimator):
     def __init__(self,
                  structure: Sequence[int]=None,
                  code_size: int=None,
-                 act_fn: str="gelu",
+                 act_fn: str="swish",
                  batch_norm: bool=True,
                  batch_size: Union[int,str]="auto",
                  validation_fraction: float=0.1,
