@@ -89,15 +89,13 @@ if __name__ == "__main__":
         preproc_transforms.append(
             ("dec",decomposition(**decomposition_config)))
 
-    pipeline_preprocessing = Pipeline(preproc_transforms)
-    learner = None
-    if args.learning_algorithm != "stdgp" and args.learning_algorithm != "m3gp":
-        learner = learning_algorithm(
-            **learning_algorithm_config,random_state=args.seed)
     cv = ShuffleSplit(args.n_folds,random_state=args.seed)
     splits = cv.split(X)
     
-    def wraper(train_val_idxs, learner=None):
+    def wraper(train_val_idxs):
+        pipeline_preprocessing = Pipeline(preproc_transforms)
+        learner = learning_algorithm(
+            **learning_algorithm_config,random_state=args.seed)
         train_idxs,val_idxs = train_val_idxs
         train_X = X[train_idxs]
         train_y = y[train_idxs]
@@ -116,13 +114,15 @@ if __name__ == "__main__":
         print("Supervised learning array shape:",
               train_X.shape)
         pipeline_preprocessing.fit(train_X_unsupervised)
+        transformed_train_X = pipeline_preprocessing.transform(train_X)
         if args.learning_algorithm != "stdgp" and args.learning_algorithm != "m3gp":
-            learner.fit(pipeline_preprocessing.transform(train_X),train_y)
+            learner.fit(transformed_train_X,train_y)
         else:
-            tr_data = pipeline_preprocessing.transform(train_X)
-            tr_data = pd.DataFrame(tr_data, columns=['X'+str(i) for i in range(tr_data.shape[1])])
-            learner = learning_algorithm(**learning_algorithm_config, random_state=args.seed)
-            learner.fit(tr_data, train_y)
+            transformed_train_X = pd.DataFrame(
+                transformed_train_X,
+                columns=['X'+str(i) 
+                         for i in range(transformed_train_X.shape[1])])
+            learner.fit(transformed_train_X, train_y)
         time_b = time.time()
         
         elapsed = time_b - time_a
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     if args.n_workers == 0:
         fold_scoring = []
         for i,(train_idxs,val_idxs) in enumerate(splits):
-            output_dict = wraper((train_idxs,val_idxs), learner)
+            output_dict = wraper((train_idxs,val_idxs))
             fold_scoring.append(output_dict)
 
     # Needs fix

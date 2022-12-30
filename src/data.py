@@ -59,7 +59,6 @@ def load_breast_cancer():
     return X,y,cat_cols
 
 def load_data(path,class_match,class_col,cols_to_exclude,first_line_idx=0):
-    print(path)
     with open(path) as o:
         lines = [l.strip().split(",") for l in o.readlines()[first_line_idx:]]
     X = [[x for i,x in enumerate(l) 
