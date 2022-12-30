@@ -267,14 +267,14 @@ class AutoEncoder(torch.nn.Module):
         self.adn_fn = adn_fn
 
         self.encoder = self.init_structure(
-            self.structure + [self.code_size])
+            [self.in_channels] + self.structure + [self.code_size])
         self.decoder = self.init_structure(
-            [self.code_size] + self.structure[::-1])
+            [self.code_size] + self.structure[::-1] + [self.in_channels])
 
     def init_structure(self,structure):
-        curr = self.in_channels
+        curr = structure[0]
         output = torch.nn.ModuleList([])
-        for s in structure:
+        for s in structure[1:]:
             output.append(torch.nn.Linear(curr,s))
             output.append(self.adn_fn(s))
             curr = s

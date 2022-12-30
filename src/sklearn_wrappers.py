@@ -117,7 +117,7 @@ class SKLearnAutoEncoder(BaseEstimator):
             self.structure_,
             self.code_size_,
             self.adn_fn_)
-        
+                
         self.init_optim()
 
         if self.verbose == True:

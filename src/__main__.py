@@ -9,6 +9,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.model_selection import ShuffleSplit
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
 from multiprocessing import Pool
 
 from .data_generator import AutoDataset
@@ -32,6 +34,9 @@ if __name__ == "__main__":
     parser.add_argument("--learning_algorithm",required=True,
                         choices=["rf","linear"],
                         help="Name of learning algorithm")
+    parser.add_argument("--unsupervised_fraction",type=float,
+                        help="Fraction of samples to be used for unsupervised\
+                            training.",default=None)
     parser.add_argument("--seed",default=42,
                         help="Random seed")
     parser.add_argument("--n_folds",default=5,type=int,
@@ -56,24 +61,28 @@ if __name__ == "__main__":
         learning_algorithm_config = yaml.load(args.learning_algorithm_config)
     else:
         learning_algorithm_config = {}
-    
+        
     dataset = supported_datasets[
         args.dataset]
-    decomposition = supported_decompositions[
-        args.decomposition]
     learning_algorithm = supported_learning_algorithms[
         args.learning_algorithm]
 
     X,y,cat_cols = dataset()
 
-    pipeline = Pipeline([
+    preproc_transforms = [
         ("auto_dataset",AutoDataset(cat_cols=cat_cols)),
         ("nzv",VarianceThreshold()),
-        ("scaler",StandardScaler()),
-        ("dec",decomposition(**decomposition_config)),
-        ("learner",learning_algorithm(**learning_algorithm_config,
-                                      random_state=args.seed))
-    ])
+        ("scaler",StandardScaler())]
+
+    if args.decomposition != "none":
+        decomposition = supported_decompositions[
+            args.decomposition]
+        preproc_transforms.append(
+            ("dec",decomposition(**decomposition_config)))
+
+    pipeline_preprocessing = Pipeline(preproc_transforms)
+    learner = learning_algorithm(
+        **learning_algorithm_config,random_state=args.seed)
 
     cv = ShuffleSplit(args.n_folds,random_state=args.seed)
     splits = cv.split(X)
@@ -86,23 +95,32 @@ if __name__ == "__main__":
         val_y = y[val_idxs]
 
         time_a = time.time()
-        pipeline.fit(train_X,train_y)
+        if args.unsupervised_fraction is not None:
+            train_X,train_X_unsupervised,train_y,_ = train_test_split(
+                train_X,train_y,test_size=args.unsupervised_fraction)
+        else:
+            train_X_unsupervised = train_X
+        pipeline_preprocessing.fit(train_X_unsupervised)
+        learner.fit(pipeline_preprocessing.transform(train_X),train_y)
         time_b = time.time()
         
         elapsed = time_b - time_a
         
         # export only what is strictly necessary 
         # to compute downstream metrics
-        pred = pipeline.predict(val_X).tolist()
+        transformed_X = pipeline_preprocessing.transform(val_X)
+        pred = learner.predict(transformed_X).tolist()
         try:
-            pred_proba = pipeline.predict_proba(val_X).tolist()
+            pred_proba = learner.predict_proba(transformed_X).tolist()
         except:
             pred_proba = None
+        nc = len(np.unique(val_y))
         output_dict = {
             "pred":pred,
             "pred_proba":pred_proba,
             "y":val_y.tolist(),
-            "n_classes":len(np.unique(val_y)),
+            "n_classes":nc,
+            "f1-score":f1_score(val_y,pred,average="binary" if nc==2 else "micro"),
             "time_elapsed":elapsed
         }
         return output_dict
