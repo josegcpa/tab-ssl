@@ -19,7 +19,7 @@ from .data import supported_datasets
 from .decomposition_utilities import supported_decompositions
 
 from .stdgp.StdGP import StdGP
-from .stdgp.save_csv import save_csv
+from .stdgp.SaveHandler import save_csv
 
 supported_learning_algorithms = {
     "rf":RandomForestClassifier,
