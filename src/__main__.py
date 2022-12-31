@@ -19,6 +19,7 @@ from .data import supported_datasets
 from .decomposition_utilities import supported_decompositions
 
 from .stdgp.StdGP import StdGP
+from .stdgp.save_csv import save_csv
 
 supported_learning_algorithms = {
     "rf":RandomForestClassifier,
@@ -36,7 +37,7 @@ if __name__ == "__main__":
                         choices=list(supported_decompositions.keys())+["none"],
                         help="Decomposition algorithm ID")
     parser.add_argument("--learning_algorithm",required=True,
-                        choices=["rf","linear", "stdgp"],
+                        choices=["rf","linear","stdgp"],
                         help="Name of learning algorithm")
     parser.add_argument("--unsupervised_fraction",type=float,
                         help="Fraction of samples to be used for unsupervised\
@@ -47,7 +48,7 @@ if __name__ == "__main__":
                         help="Number of folds")
     parser.add_argument("--decomposition_config",
                         help="Path to yaml file with decomposition args")
-    parser.add_argument("--learning_algorithm_config",
+    parser.add_argument("--learning_algorithm_config",type=str,
                         help="Path to yaml file with learning algorithm args")
     parser.add_argument("--n_workers",default=0,type=int,
                         help="Number of concurrent processes")
@@ -72,9 +73,11 @@ if __name__ == "__main__":
         decomposition_config["random_state"] = args.seed
     if args.decomposition in ["ae","vime"]:
         decomposition_config["cat_cols"] = cat_cols
-    
+
+
     if args.learning_algorithm_config is not None:
-        learning_algorithm_config = yaml.load(args.learning_algorithm_config)
+        with open(args.learning_algorithm_config, 'r') as o:
+            learning_algorithm_config = yaml.load(o)
     else:
         learning_algorithm_config = {}
 
@@ -97,7 +100,7 @@ if __name__ == "__main__":
     cv = ShuffleSplit(args.n_folds,random_state=args.seed)
     splits = cv.split(X)
     
-    def wraper(train_val_idxs, learner=None):
+    def wraper(train_val_idxs, idx, learner=None):
         train_idxs,val_idxs = train_val_idxs
         train_X = X[train_idxs]
         train_y = y[train_idxs]
@@ -108,6 +111,7 @@ if __name__ == "__main__":
         if args.unsupervised_fraction is not None:
             train_X,train_X_unsupervised,train_y,_ = train_test_split(
                 train_X,train_y,test_size=args.unsupervised_fraction,
+
                 stratify=train_y,random_state=args.seed)
             print("Unsupervised learning array shape:",
                   train_X_unsupervised.shape)
@@ -119,10 +123,16 @@ if __name__ == "__main__":
         if args.learning_algorithm != "stdgp" and args.learning_algorithm != "m3gp":
             learner.fit(pipeline_preprocessing.transform(train_X),train_y)
         else:
+            # GP requires both training and validation data to get the metrics over time
             tr_data = pipeline_preprocessing.transform(train_X)
             tr_data = pd.DataFrame(tr_data, columns=['X'+str(i) for i in range(tr_data.shape[1])])
+            tv_data = pipeline_preprocessing.transform(val_X)
+            tv_data = pd.DataFrame(tv_data, columns=['X' + str(i) for i in range(tv_data.shape[1])])
+
             learner = learning_algorithm(**learning_algorithm_config, random_state=args.seed)
-            learner.fit(tr_data, train_y)
+            learner.fit(tr_data, train_y, tv_data, val_y)
+
+            save_csv(learner, args.dataset+'_'+str(args.unsupervised_fraction), idx)
         time_b = time.time()
         
         elapsed = time_b - time_a
@@ -133,8 +143,9 @@ if __name__ == "__main__":
             transformed_X = pipeline_preprocessing.transform(val_X)
             pred = learner.predict(transformed_X).tolist()
         else:
-            tv_data = pipeline_preprocessing.transform(val_X)
-            tv_data = pd.DataFrame(tv_data, columns=['X'+str(i) for i in range(tv_data.shape[1])])
+            # Test data already transformed for GP above
+            #tv_data = pipeline_preprocessing.transform(val_X)
+            #tv_data = pd.DataFrame(tv_data, columns=['X'+str(i) for i in range(tv_data.shape[1])])
             pred = learner.getBestIndividual().predict(tv_data)
         try:
             pred_proba = learner.predict_proba(transformed_X).tolist()
@@ -156,7 +167,7 @@ if __name__ == "__main__":
     if args.n_workers == 0:
         fold_scoring = []
         for i,(train_idxs,val_idxs) in enumerate(splits):
-            output_dict = wraper((train_idxs,val_idxs), learner)
+            output_dict = wraper((train_idxs,val_idxs), i, learner)
             fold_scoring.append(output_dict)
 
     # Needs fix
