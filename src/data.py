@@ -148,6 +148,32 @@ def load_split_unlabeled(name, p_u):
     X_labeled, X_unlabeled, y, _ = train_test_split(df, random_state=42)
     return (X_labeled, y), X_unlabeled
 
+def is_underrepresented(x:np.array,p=0.05)->np.array:
+    """Function that converts a categorical array into a boolean array which
+    is True at elements present in a proportion greater than p and False
+    otherwise.
+
+    Args:
+        x (np.array): one-dimensional categorical array.
+        p (float, optional): prevalence threshold. Defaults to 0.05.
+
+    Returns:
+        np.array: indexation array.
+    """
+    u,c = np.unique(x,return_counts=True)
+    normalized_c = c / c.sum()
+    underrepresented_u = u[normalized_c <= p]
+    index_vector = np.ones_like(x,dtype=bool)
+    for u in underrepresented_u:
+        index_vector[x == u] = 0
+    return index_vector
+
+def exclude_underrepresented(X:np.array,cat_cols,p=0.05):
+    index_vector = np.ones(X.shape[0],dtype=bool)
+    for c in cat_cols:
+        index_vector = index_vector * is_underrepresented(X[:,c])
+    return X[index_vector,:]
+
 supported_datasets = {
     "iris":load_iris,
     "digits":load_digits,
