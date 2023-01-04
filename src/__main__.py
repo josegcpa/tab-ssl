@@ -74,17 +74,19 @@ if __name__ == "__main__":
     if args.decomposition in ["ae","vime"]:
         decomposition_config["cat_cols"] = cat_cols
 
-
     if args.learning_algorithm_config is not None:
         with open(args.learning_algorithm_config, 'r') as o:
             learning_algorithm_config = yaml.load(o)
     else:
         learning_algorithm_config = {}
 
-    preproc_transforms = [
-        ("auto_dataset",AutoDataset(cat_cols=cat_cols)),
-        ("nzv",VarianceThreshold()),
-        ("scaler",StandardScaler())]
+    preproc_transforms = []
+    
+    if args.decomposition not in ["ae","vime"]:
+        preproc_transforms.extend(
+            [("auto_dataset",AutoDataset(cat_cols=cat_cols)),
+             ("nzv",VarianceThreshold())]
+        )
 
     if args.decomposition != "none":
         decomposition = supported_decompositions[
@@ -96,7 +98,7 @@ if __name__ == "__main__":
     cv = ShuffleSplit(args.n_folds,random_state=args.seed)
     splits = cv.split(X)
     
-    def wraper(train_val_idxs,idx):
+    def wraper(train_val_idxs,idx=None):
         train_idxs,val_idxs = train_val_idxs
         train_X = X[train_idxs]
         train_y = y[train_idxs]
@@ -121,7 +123,8 @@ if __name__ == "__main__":
         if args.learning_algorithm not in ["stdgp","m3gp"]:
             learner.fit(pipeline_preprocessing.transform(train_X),train_y)
         else:
-            # GP requires both training and validation data to get the metrics over time
+            # GP requires both training and validation data to save metrics
+            # with training
             tr_data = pipeline_preprocessing.transform(train_X)
             tr_data = pd.DataFrame(tr_data,columns=[
                 'X'+str(i) for i in range(tr_data.shape[1])])
@@ -131,7 +134,9 @@ if __name__ == "__main__":
 
             learner.fit(tr_data, train_y, tv_data, val_y)
 
-            save_csv(learner,args.dataset+'_'+str(args.unsupervised_fraction),idx)
+            save_csv(learner,
+                     args.dataset+'_'+str(args.unsupervised_fraction),
+                     idx)
         time_b = time.time()
         
         elapsed = time_b - time_a
@@ -164,7 +169,7 @@ if __name__ == "__main__":
     if args.n_workers == 0:
         fold_scoring = []
         for i,(train_idxs,val_idxs) in enumerate(splits):
-            output_dict = wraper((train_idxs,val_idxs), i, learner)
+            output_dict = wraper((train_idxs,val_idxs), i)
             fold_scoring.append(output_dict)
 
     # Needs fix
