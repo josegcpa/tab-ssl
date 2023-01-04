@@ -289,7 +289,7 @@ class StdGP:
 
 		# Calculates the accuracy of the population using multiprocessing
 		if self.threads > 1:
-			with mp.Pool(processes= self.threads) as pool:
+			with mp.Pool(processes=self.threads) as pool:
 				results = pool.map(fitIndividuals, [(ind, self.Tr_x, self.Tr_y) for ind in self.population] )
 				for i in range(len(self.population)):
 					self.population[i].trainingPredictions = results[i][0]

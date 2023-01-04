@@ -89,7 +89,7 @@ class AutoDataset:
             self.cont_cols_ = [i for i in range(self.col_) 
                                if i not in self.cat_cols_]
         if len(self.cont_cols_) > 0:
-            self.cont_trans_ = MinMaxScaler()
+            self.cont_trans_ = StandardScaler()
             self.cont_trans_.fit(X[:,self.cont_cols_].astype(np.float32))
         self.limit_col_ = len(self.cont_cols_)
         self.new_col_names_ = [self.col_names_[i] for i in self.cont_cols_]
