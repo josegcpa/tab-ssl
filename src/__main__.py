@@ -81,43 +81,27 @@ if __name__ == "__main__":
     else:
         learning_algorithm_config = {}
 
-    cv = ShuffleSplit(args.n_folds,random_state=args.seed)
-    splits = cv.split(X)
+    preproc_transforms = [
+        ("auto_dataset",AutoDataset(cat_cols=cat_cols)),
+        ("nzv",VarianceThreshold()),
+        ("scaler",StandardScaler())]
 
-    def wraper(train_val_idxs):
-        print("Starting fold")
-        preproc_transforms = []
-        # VIME and AutoEncoder incorporate methods to handle categorical data
-        # through AutoDataset. Here we add explicitly for the linear 
-        # algorithms.
-        if args.learning_algorithm in ["linear"]:
-            preproc_transforms.append(
-                ("preproc",AutoDataset(cat_cols=cat_cols)))
-        # Since random forests are great at handling categorical values, we 
-        # can simply standardize everything.
-        elif args.learning_algorithm in ["rf"]:
-            preproc_transforms.append(
-                ("preproc",StandardScaler()))
+    if args.decomposition != "none":
+        decomposition = supported_decompositions[
+            args.decomposition]
+        preproc_transforms.append(
+            ("dec",decomposition(**decomposition_config)))
 
-        if args.decomposition != "none":
-            decomposition = supported_decompositions[
-                args.decomposition]
-            preproc_transforms.append(
-                ("dec",decomposition(**decomposition_config)))
-
-        pipeline_preprocessing = Pipeline(preproc_transforms)
-        learner = learning_algorithm(
-            **learning_algorithm_config,random_state=args.seed)
+    pipeline_preprocessing = Pipeline(preproc_transforms)
     cv = ShuffleSplit(args.n_folds,random_state=args.seed)
     splits = cv.split(X)
     
-    def wraper(train_val_idxs, idx, learner=None):
+    def wraper(train_val_idxs,idx):
         train_idxs,val_idxs = train_val_idxs
         train_X = X[train_idxs]
         train_y = y[train_idxs]
         val_X = X[val_idxs]
         val_y = y[val_idxs]
-        nc = len(np.unique(val_y))
 
         time_a = time.time()
         if args.unsupervised_fraction is not None:
@@ -125,54 +109,48 @@ if __name__ == "__main__":
                 train_X,train_y,test_size=args.unsupervised_fraction,
 
                 stratify=train_y,random_state=args.seed)
-            print("\tUnsupervised learning array shape:",
+            print("Unsupervised learning array shape:",
                   train_X_unsupervised.shape)
         else:
             train_X_unsupervised = train_X
-        print("\tSupervised learning array shape:",
+        print("Supervised learning array shape:",
               train_X.shape)
-        print("\tNumber of classes={}".format(nc))
         pipeline_preprocessing.fit(train_X_unsupervised)
-        if args.learning_algorithm != "stdgp" and args.learning_algorithm != "m3gp":
+        learner = learning_algorithm(**learning_algorithm_config,
+                                     random_state=args.seed)
+        if args.learning_algorithm not in ["stdgp","m3gp"]:
             learner.fit(pipeline_preprocessing.transform(train_X),train_y)
         else:
             # GP requires both training and validation data to get the metrics over time
             tr_data = pipeline_preprocessing.transform(train_X)
-            tr_data = pd.DataFrame(tr_data, columns=['X'+str(i) for i in range(tr_data.shape[1])])
+            tr_data = pd.DataFrame(tr_data,columns=[
+                'X'+str(i) for i in range(tr_data.shape[1])])
             tv_data = pipeline_preprocessing.transform(val_X)
-            tv_data = pd.DataFrame(tv_data, columns=['X' + str(i) for i in range(tv_data.shape[1])])
+            tv_data = pd.DataFrame(tv_data,columns=[
+                'X' + str(i) for i in range(tv_data.shape[1])])
 
-            learner = learning_algorithm(**learning_algorithm_config, random_state=args.seed)
             learner.fit(tr_data, train_y, tv_data, val_y)
 
-            save_csv(learner, args.dataset+'_'+str(args.unsupervised_fraction), idx)
+            save_csv(learner,args.dataset+'_'+str(args.unsupervised_fraction),idx)
         time_b = time.time()
-
+        
         elapsed = time_b - time_a
         
         # export only what is strictly necessary 
         # to compute downstream metrics
-        if args.learning_algorithm in ["stdgp","m3gp"]:
-            transformed_X = pipeline_preprocessing.transform(val_X)
-            transformed_X = pd.DataFrame(
-                transformed_X, columns=['X'+str(i) 
-                                        for i in range(transformed_X.shape[1])])
-            pred = learner.getBestIndividual().predict(transformed_X)
-        else:
+        if args.learning_algorithm not in ["stdgp","m3gp"]:
             transformed_X = pipeline_preprocessing.transform(val_X)
             pred = learner.predict(transformed_X).tolist()
         else:
             # Test data already transformed for GP above
-            #tv_data = pipeline_preprocessing.transform(val_X)
-            #tv_data = pd.DataFrame(tv_data, columns=['X'+str(i) for i in range(tv_data.shape[1])])
             pred = learner.getBestIndividual().predict(tv_data)
         try:
             pred_proba = learner.predict_proba(transformed_X).tolist()
         except:
             pred_proba = None
-        
+        nc = len(np.unique(val_y))
         f1 = f1_score(val_y,pred,average="binary" if nc==2 else "micro")
-        print("\tF1-score={}".format(f1))
+        print("Fold concluded\n\tF1-score={}".format(f1))
         output_dict = {
             "pred":pred,
             "pred_proba":pred_proba,
@@ -189,6 +167,7 @@ if __name__ == "__main__":
             output_dict = wraper((train_idxs,val_idxs), i, learner)
             fold_scoring.append(output_dict)
 
+    # Needs fix
     else:
         pool = Pool(args.n_workers)
         fold_scoring = pool.map(wraper,splits)
