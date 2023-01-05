@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import ElasticNetCV
+from sklearn.linear_model import LogisticRegressionCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_selection import VarianceThreshold
@@ -23,9 +23,8 @@ from .stdgp.SaveHandler import save_csv
 
 supported_learning_algorithms = {
     "rf":RandomForestClassifier,
-    "linear":ElasticNetCV,
-    "stdgp": StdGP,
-}
+    "linear":LogisticRegressionCV,
+    "stdgp": StdGP}
 
 if __name__ == "__main__":    
     parser = argparse.ArgumentParser()
@@ -138,9 +137,9 @@ if __name__ == "__main__":
                      args.dataset+'_'+str(args.unsupervised_fraction),
                      idx)
         time_b = time.time()
-        
+
         elapsed = time_b - time_a
-        
+
         # export only what is strictly necessary 
         # to compute downstream metrics
         if args.learning_algorithm not in ["stdgp","m3gp"]:
