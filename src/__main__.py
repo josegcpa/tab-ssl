@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--unsupervised_fraction",type=float,
                         help="Fraction of samples to be used for unsupervised\
                             training.",default=None)
-    parser.add_argument("--seed",default=42,
+    parser.add_argument("--seed",default=42,type=int,
                         help="Random seed")
     parser.add_argument("--n_folds",default=5,type=int,
                         help="Number of folds")
@@ -105,10 +105,10 @@ if __name__ == "__main__":
         val_y = y[val_idxs]
 
         time_a = time.time()
-        if args.unsupervised_fraction is not None:
+        uf = args.unsupervised_fraction
+        if uf is not None and uf < 1.0:
             train_X,train_X_unsupervised,train_y,_ = train_test_split(
                 train_X,train_y,test_size=args.unsupervised_fraction,
-
                 stratify=train_y,random_state=args.seed)
             print("Unsupervised learning array shape:",
                   train_X_unsupervised.shape)
